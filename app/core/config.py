@@ -1,5 +1,11 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
 
 class Settings(BaseSettings):
     openai_api_key: str
