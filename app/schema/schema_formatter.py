@@ -17,9 +17,7 @@ class SchemaFormatter:
                     f"- {column['name']} ({column['type']})"
                 )
 
-            pk = table["primary_key"].get(
-                "constrained_columns", []
-            )
+            pk = table["primary_keys"].get("constrained_columns", [])
 
             if pk:
 

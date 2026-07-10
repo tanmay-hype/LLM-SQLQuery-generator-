@@ -9,12 +9,9 @@ This module combines:
 5. User question
 """
 
-from typing import Dict
 
 class PromptBuilder:
-    """
-    Responsible for constructing structured prompts for the LLM.
-    """
+    """Responsible for constructing structured prompts for the LLM."""
 
     SYSTEM_INSTRUCTIONS = """
 You are an expert PostgreSQL SQL generator.
@@ -45,7 +42,7 @@ Rules:
 SELECT 'Insufficient information';
 """
 
-  SAFETY_RULES = """
+    SAFETY_RULES = """
 Safety Constraints:
 
 - Only generate SELECT statements.
@@ -58,12 +55,11 @@ Safety Constraints:
 - Never generate TRUNCATE.
 """
 
- @staticmethod
-   def build_prompt(cls, schema: str, user_question: str) -> str:
+    @classmethod
+    def build_prompt(cls, schema: str, user_question: str) -> str:
         """
         Constructs the final prompt for the LLM.
 
- 
         Args:
             schema: Formatted database schema.
             user_question: Natural language query.
@@ -71,7 +67,8 @@ Safety Constraints:
         Returns:
             Complete prompt for the LLM.
         """
-                prompt = f"""
+
+        prompt = f"""
 {cls.SYSTEM_INSTRUCTIONS}
 
 ----------------------------------------
@@ -102,4 +99,3 @@ SQL:
 """
 
         return prompt.strip()
-    

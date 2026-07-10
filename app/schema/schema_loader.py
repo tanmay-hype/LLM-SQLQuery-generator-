@@ -36,17 +36,15 @@ class SchemaLoader:
 
 
     def load_schema(self):
-         """
+        """
         Reads all tables and their columns.
         """
         schema = {}
         for table in self.get_tables():
-            schema[table] = 
-                {
-                    
+            schema[table] = {
                     "columns": self.get_columns(table),
                     "primary_keys": self.get_primary_keys(table),
                     "foreign_keys": self.get_foreign_keys(table)
-                }
+            }
 
         return schema
