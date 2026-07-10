@@ -1,26 +1,25 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.core.database import engine
 from app.models.request import SQLRequest
 from app.models.response import SQLResponse
 
-from app.schema.schema_loader import SchemaLoader
-from app.schema.schema_formatter import SchemaFormatter
-from app.llm.sql_generator import SQLGenerator
-from app.llm.prompt_builder import PromptBuilder
+from app.core.dependencies import get_query_service
+from app.services.query_service import QueryService
+from app.services.validator import SQLValidationError
 
-from app.services.validator import SQLValidator, SQLValidationError
-
-from app.services.sql_executor import SQLExecutor, SQLExecutionError
+from app.services.sql_executor import SQLExecutionError
 
 router = APIRouter()
 
 @router.post(
-    "/generate_sql",
-    response_model=SQLResponse
+    "/generate-sql",
+    response_model=SQLResponse,
+    operation_id="generate_sql_hyphenated",
 )
-
-def generate_sql(request: SQLRequest):
+def generate_sql(
+    request: SQLRequest,
+    query_service: QueryService = Depends(get_query_service),
+):
     """
     Convert natural language into SQL,
     execute it,
@@ -28,35 +27,7 @@ def generate_sql(request: SQLRequest):
     """
 
     try:
-        loader = SchemaLoader(engine)
-
-        # Load schema
-        schema = loader.load_schema()
-
-        # Format schema
-        formatted_schema = SchemaFormatter.format(schema)
-
-        # Build prompt
-        prompt = PromptBuilder.build_prompt(
-            schema=formatted_schema,
-            user_question=request.question,
-        )
-
-        # Generate SQL
-        generator = SQLGenerator()
-
-        sql = generator.generate_sql(prompt)
-
-        # Validate SQL
-        SQLValidator.validate(sql)
-
-        # Execute SQL
-        results = SQLExecutor.execute(sql)
-
-        return SQLResponse(
-            sql=sql,
-            results=results,
-        )
+        return query_service.generate_sql(request.question)
 
     except SQLValidationError as e:
 
@@ -72,12 +43,12 @@ def generate_sql(request: SQLRequest):
             detail=str(e),
         )
 
-    except Exception as e:
+"""  except Exception as e:
 
         raise HTTPException(
             status_code=500,
             detail=str(e),
-        )
+        )"""
     
 
 @router.get("/")
