@@ -20,11 +20,12 @@ def generate_sql(
     request: SQLRequest,
     query_service: QueryService = Depends(get_query_service),
 ):
+    return query_service.generate_sql(request.question)
     """
     Convert natural language into SQL,
     execute it,
     and return the results.
-    """
+    
 
     try:
         return query_service.generate_sql(request.question)
@@ -43,7 +44,7 @@ def generate_sql(
             detail=str(e),
         )
 
-"""  except Exception as e:
+  except Exception as e:
 
         raise HTTPException(
             status_code=500,

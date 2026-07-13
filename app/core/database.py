@@ -7,6 +7,8 @@ engine = create_engine(
     settings.database_url,
     echo=settings.debug,
     pool_pre_ping=True,
+    pool_recycle=3600,
+    future=True
 )
 
 SessionLocal = sessionmaker(
