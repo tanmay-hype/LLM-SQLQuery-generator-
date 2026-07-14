@@ -1,5 +1,7 @@
 from app.models.response import SQLResponse
 
+import logging
+logger = logging.getLogger(__name__)
 
 class QueryService:
 
@@ -26,15 +28,20 @@ class QueryService:
         """
         Build the prompt, generate SQL, validate it, and execute it.
         """
-
+        logger.info("Loading database schema")
         schema = self.schema_loader.load_schema()
+        logger.info("Formatting database schema")
         formatted_schema = self.schema_formatter.format(schema)
+        logger.info("Building prompt")
         prompt = self.prompt_builder.build_prompt(
             schema=formatted_schema,
             user_question=question,
         )
+        logger.info("Generating SQL using LLM")
         sql = self.sql_generator.generate_sql(prompt)
+        logger.info("Validating SQL")
         validated_sql = self.sql_validator.validate(sql, schema)
+        logger.info("Executing SQL")
         results = self.sql_executor.execute(validated_sql)
 
         return SQLResponse(
