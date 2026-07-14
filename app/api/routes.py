@@ -21,36 +21,6 @@ def generate_sql(
     query_service: QueryService = Depends(get_query_service),
 ):
     return query_service.generate_sql(request.question)
-    """
-    Convert natural language into SQL,
-    execute it,
-    and return the results.
-    
-
-    try:
-        return query_service.generate_sql(request.question)
-
-    except SQLValidationError as e:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(e),
-        )
-
-    except SQLExecutionError as e:
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(e),
-        )
-
-  except Exception as e:
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(e),
-        )"""
-    
 
 @router.get("/")
 def health():

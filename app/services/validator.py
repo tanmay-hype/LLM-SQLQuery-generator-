@@ -1,4 +1,6 @@
 import re
+from app.exceptions import SQLValidationError
+
 
 try:
     from sqlglot import exp, parse_one
@@ -7,10 +9,6 @@ except ImportError:  # pragma: no cover - depends on runtime environment
     exp = None
     parse_one = None
     ParseError = Exception
-
-
-class SQLValidationError(Exception):
-    """Raised when generated SQL is invalid."""
 
 
 class SQLValidator:

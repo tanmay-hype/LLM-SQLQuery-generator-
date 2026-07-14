@@ -1,26 +1,37 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from app.services.validator import SQLValidationError
-from app.services.sql_executor import SQLExecutionError 
+from app.exceptions.base import AppException
+
 
 def register_exception_handlers(app: FastAPI):
-    @app.exception_handler(SQLValidationError)
-    async def sql_validation_handler(request: Request, exc: SQLValidationError):
+    
+    
+    @app.exception_handler(AppException)
+    async def app_exception_handler(
+        request: Request,
+        exc: AppException,
+    ):
+
+        response = {
+            "error": exc.message
+        }
+
+        if exc.details is not None:
+            response["details"] = exc.details
+
         return JSONResponse(
-            status_code=400,
-            content={"error": str(exc)},
+            status_code=exc.status_code,
+            content=response,
         )
 
-    @app.exception_handler(SQLExecutionError)
-    async def sql_execution_handler(request: Request, exc: SQLExecutionError):
-        return JSONResponse(
-            status_code=500,
-            content={"error": str(exc)},
-        )
     @app.exception_handler(Exception)
-    async def unexpected_exception_handler(request: Request, exc: Exception):
+    async def unhandled_exception(
+        request: Request,
+        exc: Exception,
+    ):
         return JSONResponse(
             status_code=500,
-            content={"error": "Internal Server Error: " },
-        )
-        
+            content={
+                "error": "Internal Server Error"
+            },
+        )        

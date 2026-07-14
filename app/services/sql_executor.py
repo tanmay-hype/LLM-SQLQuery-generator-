@@ -1,12 +1,11 @@
 from typing import List, Dict, Any
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from app.exceptions import SQLExecutionError
+
 
 from app.core.database import engine
 
-class SQLExecutionError(Exception):
-    """Custom exception for SQL execution errors."""
-    pass
 
 class SQLExecutor:
     """
