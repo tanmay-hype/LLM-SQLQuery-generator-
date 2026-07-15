@@ -17,7 +17,9 @@ class SchemaRetriever:
         """
         tokens = self._tokenize(question)
         scores = self._score_tables(schema, tokens)
-        return self._select_tables(schema, scores, top_k)
+        selected_schema = self._select_tables(schema, scores, top_k)
+        selected_tables = self._expand_related_tables(schema, set(selected_schema.keys()))
+        return {table: schema[table] for table in selected_tables}
     
     def _tokenize(self, question: str) -> list[str]:
         """
@@ -78,3 +80,19 @@ class SchemaRetriever:
                 elif token in column_name:
                     score += self.COLUMN_PARTIAL_MATCH
         return score
+    
+    def _expand_related_tables(self, schema: dict, selected_tables: set[str]) -> set[str]:
+        """
+        Expand the selected tables to include related tables based on foreign keys.
+        """
+        expanded = set(selected_tables)
+        for table_name, table_info in schema.items():
+            foreign_keys = table_info.get("foreign_keys", [])
+            for fk in foreign_keys:
+                referred = fk.get("referred_table")
+                
+                if table_name in selected_tables or referred:
+                    expanded.add(referred)
+                if referred in selected_tables:
+                    expanded.add(table_name)
+        return expanded
