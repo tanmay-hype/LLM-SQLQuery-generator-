@@ -1,8 +1,7 @@
-import re 
-from collections import defaultdict
+import re
 from app.core.config import (
-    SCHEMA_RETRIEVAL_MIN_SCORE,
-    SCHEMA_RETRIEVAL_TOP_K, 
+    SCHEMA_RETRIEVER_MIN_SCORE,
+    SCHEMA_RETRIEVER_TOP_K,
 )
 class SchemaRetriever:
     """
@@ -14,7 +13,7 @@ class SchemaRetriever:
     COLUMN_EXACT_MATCH = 6
     COLUMN_PARTIAL_MATCH = 3
     
-    def retrieve(self, schema: dict, question: str, top_k: int = SCHEMA_RETRIEVAL_TOP_K) -> dict:
+    def retrieve(self, schema: dict, question: str, top_k: int = SCHEMA_RETRIEVER_TOP_K) -> dict:
         """
         Retrieve the most relevant tables from the schema based on the question.
         """
@@ -46,10 +45,14 @@ class SchemaRetriever:
         return scores
     
     def _select_tables(self, schema: dict, scores: dict, top_k: int) -> dict:
-            """
-            Return the highest-scoring tables above the minimum threshold.
-           """
-        filtered_scores = {table: score for table, score in scores.items() if score >= SCHEMA_RETRIEVAL_MINIMUM_SCORE}
+        """
+        Return the highest-scoring tables above the minimum threshold.
+        """
+        filtered_scores = {
+            table: score
+            for table, score in scores.items()
+            if score >= SCHEMA_RETRIEVER_MIN_SCORE
+        }
         #fallback if nothing passes the minimum score, return the first top_k tables in the schema
         if not filtered_scores:
             return dict(list(schema.items())[:top_k])  # Return first top_k tables if no scores 
@@ -95,8 +98,8 @@ class SchemaRetriever:
             foreign_keys = table_info.get("foreign_keys", [])
             for fk in foreign_keys:
                 referred = fk.get("referred_table")
-                
-                if table_name in selected_tables or referred:
+
+                if table_name in selected_tables and referred:
                     expanded.add(referred)
                 if referred in selected_tables:
                     expanded.add(table_name)

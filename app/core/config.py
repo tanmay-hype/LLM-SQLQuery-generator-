@@ -12,7 +12,7 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b")
 
 SCHEMA_RETRIEVER_TOP_K = int(os.getenv("SCHEMA_RETRIEVER_TOP_K", 5))
-SCHEMA_RETRIEVER_MINIMUM_SCORE = int(os.getenv("SCHEMA_RETRIEVER_MINIMUM_SCORE", 5))
+SCHEMA_RETRIEVER_MIN_SCORE = int(os.getenv("SCHEMA_RETRIEVER_MIN_SCORE", 5))
 class Settings(BaseSettings):
     openai_api_key: str = ""
     gemini_api_key: str = ""
@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     model_name: str = "gpt-4.1"
     app_name: str = "LLM SQL Generator"
     debug: bool = False
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+    postgres_db: str = "llm_sql"
+    schema_retriever_top_k: int = 5
+    schema_retriever_min_score: int = 5
+    schema_retrieval_top_k: int = 5
+    schema_retrieval_min_score: int = 5
 
     model_config = SettingsConfigDict(
         env_file=".env",

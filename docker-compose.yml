@@ -16,6 +16,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ollama:
+        condition: service_started
+
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+
+    container_name: ollama
+
+    volumes:
+      - ollama_data:/root/.ollama
 
     restart: unless-stopped
 
@@ -49,4 +61,5 @@ services:
       start_period: 10s
 
 volumes:
+  ollama_data:
   postgres_data:
