@@ -1,6 +1,9 @@
 import re 
 from collections import defaultdict
-
+from app.core.config import (
+    SCHEMA_RETRIEVAL_MIN_SCORE,
+    SCHEMA_RETRIEVAL_TOP_K, 
+)
 class SchemaRetriever:
     """
     Retrieves the most relevant tables from the schema
@@ -11,7 +14,7 @@ class SchemaRetriever:
     COLUMN_EXACT_MATCH = 6
     COLUMN_PARTIAL_MATCH = 3
     
-    def retrieve(self, schema: dict, question: str, top_k: int = 5) -> dict:
+    def retrieve(self, schema: dict, question: str, top_k: int = SCHEMA_RETRIEVAL_TOP_K) -> dict:
         """
         Retrieve the most relevant tables from the schema based on the question.
         """
@@ -43,12 +46,14 @@ class SchemaRetriever:
         return scores
     
     def _select_tables(self, schema: dict, scores: dict, top_k: int) -> dict:
-        """
-        Select the top_k tables based on their scores.
-        """
-        if not scores:
+            """
+            Return the highest-scoring tables above the minimum threshold.
+           """
+        filtered_scores = {table: score for table, score in scores.items() if score >= SCHEMA_RETRIEVAL_MINIMUM_SCORE}
+        #fallback if nothing passes the minimum score, return the first top_k tables in the schema
+        if not filtered_scores:
             return dict(list(schema.items())[:top_k])  # Return first top_k tables if no scores 
-        ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+        ranked = sorted(filtered_scores.items(), key=lambda item: item[1], reverse=True)
         selected = {}
         for table_name, _ in ranked[:top_k]:
             selected[table_name] = schema[table_name]

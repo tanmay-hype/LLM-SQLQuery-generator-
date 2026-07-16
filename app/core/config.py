@@ -11,6 +11,8 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b")
 
+SCHEMA_RETRIEVER_TOP_K = int(os.getenv("SCHEMA_RETRIEVER_TOP_K", 5))
+SCHEMA_RETRIEVER_MINIMUM_SCORE = int(os.getenv("SCHEMA_RETRIEVER_MINIMUM_SCORE", 5))
 class Settings(BaseSettings):
     openai_api_key: str = ""
     gemini_api_key: str = ""
