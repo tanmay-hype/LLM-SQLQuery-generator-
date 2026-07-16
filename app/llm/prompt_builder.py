@@ -1,3 +1,4 @@
+from app.models.intent_analysis import IntentAnalysis
 """
 Builds structured prompts for the LLM.
 
@@ -56,13 +57,15 @@ Safety Constraints:
 """
 
     @classmethod
-    def build_prompt(cls, schema: str, user_question: str) -> str:
+    def build_prompt(self, schema: str, user_question: str, intent: IntentAnalysis) -> str:
+        intent_rules = self._intent_instructions(intent)
         """
         Constructs the final prompt for the LLM.
 
         Args:
             schema: Formatted database schema.
             user_question: Natural language query.
+            intent: Analyzed query intent.
 
         Returns:
             Complete prompt for the LLM.
@@ -74,6 +77,10 @@ Safety Constraints:
 ----------------------------------------
 DATABASE SCHEMA
 ----------------------------------------
+
+Intent-Specific Instructions:
+{intent_rules}
+
 
 {schema}
 
@@ -99,3 +106,56 @@ SQL:
 """
 
         return prompt.strip()
+    
+INTENT_RULES = {
+
+    QueryIntent.LOOKUP:
+"""
+Return the requested rows.
+Avoid unnecessary joins.
+""",
+
+    QueryIntent.AGGREGATION:
+"""
+Use aggregate functions when appropriate.
+Include GROUP BY whenever required.
+""",
+
+    QueryIntent.TIME_SERIES:
+"""
+When analyzing dates,
+group chronologically
+and order results by time.
+""",
+
+    QueryIntent.SORT:
+"""
+Sort the results appropriately.
+Use LIMIT when the user requests Top-N.
+""",
+
+    QueryIntent.COMPARISON:
+"""
+Generate SQL that compares datasets accurately.
+Use joins or CTEs when needed.
+""",
+
+    QueryIntent.JOIN:
+"""
+Join related tables using foreign-key relationships.
+Avoid Cartesian products.
+""",
+
+}
+
+    def _intent_instructions(self, intent: IntentAnalysis) -> str:
+        """
+        Generates prompt instructions based on the detected intent.
+        """
+        instructions = []
+        instructions.append(self.INTENT_RULES[intent.primary])
+        for secondary in intent.secondary: 
+            if secondary in intent.secondary:
+                instructions.append(self.INTENT_RULES[secondary])
+        return "\n".join(instructions)
+    

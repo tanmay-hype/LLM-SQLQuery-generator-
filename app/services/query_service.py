@@ -13,7 +13,7 @@ from app.schema.schema_retriever import SchemaRetriever
 
 from app.services.sql_executor import SQLExecutor
 from app.services.validator import SQLValidator
-
+from app.services.intent_detector import IntentDetector
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ class QueryService:
         self.schema_loader = SchemaLoader(db_engine)
         self.schema_retriever = SchemaRetriever()
         self.schema_formatter = SchemaFormatter()
+        
+        self.intent_detector = IntentDetector()
 
         self.prompt_builder = PromptBuilder()
         self.sql_generator = SQLGenerator()
@@ -49,6 +51,8 @@ class QueryService:
 
         logger.info("Loading database schema...")
         schema = self.schema_loader.load_schema()
+        
+        intent = self.intent_detector.detect(question)
 
         logger.info("Retrieving relevant schema...")
         relevant_schema = self.schema_retriever.retrieve(
@@ -62,9 +66,12 @@ class QueryService:
         )
 
         logger.info("Building prompt...")
+        intent = self.intent_detector.detect(question)
+        
         prompt = self.prompt_builder.build_prompt(
             schema=formatted_schema,
             user_question=question,
+            intent=intent,
         )
 
         logger.info("Generating SQL using LLM...")
