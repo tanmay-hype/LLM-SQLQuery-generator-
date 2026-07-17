@@ -21,7 +21,7 @@ class ExampleRetriever:
     def retrieve(
         self,
         analysis: IntentAnalysis,
-        top_k: int = EXAMPLE_RETRIEVER_TOP_K,
+        top_k: int = settings.example_retriever_top_k,
     ) -> list[PromptExample]:
         """
         Retrieve the highest-scoring prompt examples.

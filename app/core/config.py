@@ -39,6 +39,9 @@ class Settings(BaseSettings):
 
     openai_model: str = "gpt-4.1"
 
+    # Compatibility with existing env key MODEL_NAME.
+    model_name: str = "gpt-4.1"
+
     gemini_api_key: str = ""
 
     gemini_model: str = "gemini-2.5-pro"
@@ -51,9 +54,14 @@ class Settings(BaseSettings):
     # Schema Retrieval
     # --------------------------------------------------
 
-    settings.schema_retriever_top_k: int = 5
+    schema_retriever_top_k: int = 5
 
-    settings.schema_retriever_min_score: int = 5
+    schema_retriever_min_score: int = 5
+
+    # Backward-compatible aliases for existing env keys.
+    schema_retrieval_top_k: int = 5
+
+    schema_retrieval_min_score: int = 5
 
     # --------------------------------------------------
     # Example Retrieval
@@ -81,3 +89,11 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+# Module-level aliases used by existing imports.
+OPENAI_API_KEY = settings.openai_api_key
+OPENAI_MODEL = settings.openai_model
+GEMINI_API_KEY = settings.gemini_api_key
+GEMINI_MODEL = settings.gemini_model
+OLLAMA_BASE_URL = settings.ollama_base_url
+OLLAMA_MODEL = settings.ollama_model
