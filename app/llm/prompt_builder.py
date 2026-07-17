@@ -1,6 +1,6 @@
 from app.models.intent import QueryIntent
 from app.models.intent_analysis import IntentAnalysis
-
+from app.llm.prompt_examples.examples import EXAMPLES
 
 class PromptBuilder:
     """
@@ -99,6 +99,7 @@ Do not make unnecessary assumptions.
         sections = [
             self._system_prompt(),
             self._intent_prompt(intent),
+            self._examples_prompt(),
             self._schema_prompt(schema),
             self._rules_prompt(),
             self._safety_prompt(),
@@ -190,3 +191,25 @@ Do not make unnecessary assumptions.
 SQL:
 """,
         )
+    
+    def _examples_prompt(self) -> str:
+        
+        sections = []
+        for example in EXAMPLES:
+            sections.append(
+                f"""
+Question: {example['question']}
+
+SQL: {example['sql']}
+""".strip()
+            )
+        return self._section(
+            "EXAMPLES",
+            "\n\n".join(sections),
+        )
+    
+    def build_prompt(self, schema: str, user_question: str, intent: IntentAnalysis, examples: list[PromptExample]) -> str:
+        
+        pass
+    
+    def _examples_prompt(self, examples: list[PromptExample]) -> str:

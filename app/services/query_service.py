@@ -68,10 +68,13 @@ class QueryService:
         logger.info("Building prompt...")
         intent = self.intent_detector.detect(question)
         
+        examples = self.example_retriever.retrieve( intent)
+        
         prompt = self.prompt_builder.build_prompt(
             schema=formatted_schema,
             user_question=question,
             intent=intent,
+            examples=examples,
         )
 
         logger.info("Generating SQL using LLM...")
