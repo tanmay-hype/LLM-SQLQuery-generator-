@@ -5,15 +5,19 @@ from app.core.database import engine
 from app.llm.prompt_builder import PromptBuilder
 from app.llm.sql_generator import SQLGenerator
 
+from app.llm.prompt_examples.repository import ExampleRepository
+from app.llm.prompt_examples.retriever import ExampleRetriever
+
 from app.models.response import SQLResponse
 
-from app.schema.schema_loader import SchemaLoader
 from app.schema.schema_formatter import SchemaFormatter
+from app.schema.schema_loader import SchemaLoader
 from app.schema.schema_retriever import SchemaRetriever
 
+from app.services.intent_detector import IntentDetector
 from app.services.sql_executor import SQLExecutor
 from app.services.validator import SQLValidator
-from app.services.intent_detector import IntentDetector
+
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +28,17 @@ class QueryService:
     """
 
     def __init__(self, db_engine=engine):
+
         self.schema_loader = SchemaLoader(db_engine)
         self.schema_retriever = SchemaRetriever()
         self.schema_formatter = SchemaFormatter()
-        
+
         self.intent_detector = IntentDetector()
+
+        self.example_repository = ExampleRepository()
+        self.example_retriever = ExampleRetriever(
+            self.example_repository
+        )
 
         self.prompt_builder = PromptBuilder()
         self.sql_generator = SQLGenerator()
@@ -36,57 +46,67 @@ class QueryService:
         self.sql_validator = SQLValidator()
         self.sql_executor = SQLExecutor()
 
-    def generate_sql(self, question: str) -> SQLResponse:
+    def generate_sql(
+        self,
+        question: str,
+    ) -> SQLResponse:
         """
-        Complete workflow:
-        1. Load schema
-        2. Retrieve relevant tables
-        3. Format schema
-        4. Build prompt
-        5. Generate SQL
-        6. Validate SQL
-        7. Execute SQL
-        8. Return response
+        Complete Natural Language → SQL pipeline.
         """
 
         logger.info("Loading database schema...")
+
         schema = self.schema_loader.load_schema()
-        
-        intent = self.intent_detector.detect(question)
+
+        logger.info("Detecting query intent...")
+
+        intent_analysis = self.intent_detector.detect(
+            question
+        )
 
         logger.info("Retrieving relevant schema...")
+
         relevant_schema = self.schema_retriever.retrieve(
             schema=schema,
             question=question,
         )
 
         logger.info("Formatting schema...")
+
         formatted_schema = self.schema_formatter.format(
             relevant_schema
         )
 
+        logger.info("Retrieving prompt examples...")
+
+        examples = self.example_retriever.retrieve(
+            analysis=intent_analysis,
+        )
+
         logger.info("Building prompt...")
-        intent = self.intent_detector.detect(question)
-        
-        examples = self.example_retriever.retrieve( intent)
-        
+
         prompt = self.prompt_builder.build_prompt(
             schema=formatted_schema,
             user_question=question,
-            intent=intent,
+            intent=intent_analysis,
             examples=examples,
         )
 
         logger.info("Generating SQL using LLM...")
-        sql = self.sql_generator.generate_sql(prompt)
+
+        sql = self.sql_generator.generate_sql(
+            prompt
+        )
 
         logger.info("Validating generated SQL...")
+
         validated_sql = self.sql_validator.validate(
             sql,
             schema,
         )
 
         logger.info("Executing SQL...")
+
         results = self.sql_executor.execute(
             validated_sql
         )

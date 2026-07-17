@@ -1,28 +1,73 @@
+from app.core.config import settings
+from app.llm.prompt_examples.repository import ExampleRepository
+from app.models.intent_analysis import IntentAnalysis
+from app.models.prompt_example import PromptExample
+
+
 class ExampleRetriever:
-    
+    """
+    Retrieves the most relevant few-shot examples based on
+    the detected query intent.
+    """
+
     PRIMARY_WEIGHT = 5
     SECONDARY_WEIGHT = 2
-    
-    scored = [item for item in scored if item[0]>= self.MIN_SCORE]
-    for example in self.repository.get_examples():
-        score = self._score_example(example, analysis)
-        scored.append((example, score))
-    
+
+    MIN_SCORE = 3
+
     def __init__(self, repository: ExampleRepository):
         self.repository = repository
 
-    def retrieve(self, question: str, intent: QueryIntent, top_k: int = EXAMPLE_RETRIEVER_TOP_K) -> list[PromptExample]:
+    def retrieve(
+        self,
+        analysis: IntentAnalysis,
+        top_k: int = EXAMPLE_RETRIEVER_TOP_K,
+    ) -> list[PromptExample]:
         """
-        Retrieves the most relevant prompt examples based on the input question and intent.
+        Retrieve the highest-scoring prompt examples.
         """
-        return [ example for example in self.repository.get_examples() if example.intents & {intent.primary} ][:top_k]
-    
-    def _score_example(self, example: PromptExample, analysis: IntentAnalysis) -> int:
+
+        scored_examples: list[tuple[int, PromptExample]] = []
+
+        for example in self.repository.get_examples():
+
+            score = self._score_example(
+                example,
+                analysis,
+            )
+
+            if score >= self.MIN_SCORE:
+                scored_examples.append(
+                    (score, example)
+                )
+
+        scored_examples.sort(
+            key=lambda item: item[0],
+            reverse=True,
+        )
+
+        return [
+            example
+            for _, example in scored_examples[:top_k]
+        ]
+
+    def _score_example(
+        self,
+        example: PromptExample,
+        analysis: IntentAnalysis,
+    ) -> int:
+        """
+        Compute a relevance score for one prompt example.
+        """
+
         score = 0
+
         if analysis.primary in example.intents:
             score += self.PRIMARY_WEIGHT
+
         for intent in analysis.secondary:
+
             if intent in example.intents:
                 score += self.SECONDARY_WEIGHT
-                scored.sort(key=lambda item: item[1], reverse=True)
-        return [example for _, example in scored[: self.MAX_EXAMPLES]]
+
+        return score

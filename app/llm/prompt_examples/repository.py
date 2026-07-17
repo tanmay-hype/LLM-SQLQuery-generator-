@@ -1,253 +1,278 @@
+from app.models.intent import QueryIntent
 from app.models.prompt_example import PromptExample
+
 
 class ExampleRepository:
     """
-    Repository for managing prompt examples.
+    Repository that stores and provides all few-shot prompt examples.
     """
 
-"""    def __init__(self):
-        self.examples = EXAMPLES
+    def __init__(self) -> None:
+        self.examples: list[PromptExample] = EXAMPLES
 
     def get_examples(self) -> list[PromptExample]:
         """
-        Returns all prompt examples.
+        Return all available prompt examples.
+
+        A copy of the internal list is returned to prevent accidental
+        modification by callers.
         """
-        return self.examples """
+        return list(self.examples)
 
 EXAMPLES = [
     PromptExample(
-        question="Show all customers.",
-        intent=QueryIntent.SHOW_CUSTOMERS,
-        sql="SELECT * FROM customers;"
+        intents={QueryIntent.LOOKUP, QueryIntent.FILTER},
+        question="List active customers from California",
+        sql="""
+SELECT
+    customer_id,
+    full_name,
+    email
+FROM customers
+WHERE state = 'CA'
+  AND is_active = TRUE;
+""",
     ),
     PromptExample(
-        question="Show all orders.",
-        intent=QueryIntent.SHOW_ORDERS,
-        sql="SELECT * FROM orders;"
+        intents={QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Total sales by category",
+        sql="""
+SELECT
+    category,
+    SUM(amount) AS total_sales
+FROM sales
+GROUP BY category
+ORDER BY total_sales DESC;
+""",
     ),
     PromptExample(
-        question="Show all products.",
-        intent=QueryIntent.SHOW_PRODUCTS,
-        sql="SELECT * FROM products;"
+        intents={QueryIntent.SORT, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Top 5 customers by total purchase amount",
+        sql="""
+SELECT
+    customer_id,
+    SUM(total_amount) AS total_purchases
+FROM orders
+GROUP BY customer_id
+ORDER BY total_purchases DESC
+LIMIT 5;
+""",
     ),
     PromptExample(
-        question="Show customer orders.",
-        intent=QueryIntent.SHOW_CUSTOMER_ORDERS,
-        sql="SELECT * FROM orders WHERE customer_id = ?;"
+        intents={QueryIntent.JOIN, QueryIntent.LOOKUP},
+        question="Show order id, customer name, and order date",
+        sql="""
+SELECT
+    o.order_id,
+    c.full_name AS customer_name,
+    o.order_date
+FROM orders AS o
+JOIN customers AS c
+  ON c.customer_id = o.customer_id;
+""",
     ),
     PromptExample(
-        question="Count all the orders.",
-        intent=QueryIntent.COUNT_ORDERS,
-        sql="SELECT COUNT(*) AS order_count FROM orders;"
+        intents={QueryIntent.TIME_SERIES, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Monthly revenue for the last 12 months",
+        sql="""
+SELECT
+    DATE_TRUNC('month', order_date) AS month,
+    SUM(total_amount) AS revenue
+FROM orders
+WHERE order_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+GROUP BY month
+ORDER BY month;
+""",
     ),
     PromptExample(
-        question="Show order details.",
-        intent=QueryIntent.SHOW_ORDER_DETAILS,
-        sql="SELECT * FROM order_details WHERE order_id = ?;"
+        intents={QueryIntent.COMPARISON, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Compare paid and unpaid invoice counts",
+        sql="""
+SELECT
+    payment_status,
+    COUNT(*) AS invoice_count
+FROM invoices
+GROUP BY payment_status
+ORDER BY invoice_count DESC;
+""",
     ),
     PromptExample(
-        question="Show the total sales per product.",
-        intent=QueryIntent.SHOW_TOTAL_SALES_PER_PRODUCT,
-        sql="SELECT product_id, SUM(quantity * price) AS total_sales FROM order_details GROUP BY product_id;"
+        intents={QueryIntent.FILTER, QueryIntent.AGGREGATION},
+        question="How many orders were placed this week",
+        sql="""
+SELECT
+    COUNT(*) AS orders_this_week
+FROM orders
+WHERE order_date >= DATE_TRUNC('week', CURRENT_DATE)
+  AND order_date < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week';
+""",
     ),
     PromptExample(
-        question="Show the average order value.",
-        intent=QueryIntent.SHOW_AVERAGE_ORDER_VALUE,
-        sql="SELECT AVG(total_amount) AS average_order_value FROM orders;"
+        intents={QueryIntent.JOIN, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Average order value by customer segment",
+        sql="""
+SELECT
+    c.segment,
+    AVG(o.total_amount) AS avg_order_value
+FROM orders AS o
+JOIN customers AS c
+  ON c.customer_id = o.customer_id
+GROUP BY c.segment
+ORDER BY avg_order_value DESC;
+""",
     ),
     PromptExample(
-        question="Show the total revenue.",
-        intent=QueryIntent.SHOW_TOTAL_REVENUE,
-        sql="SELECT SUM(total_amount) AS total_revenue FROM orders;"
+        intents={QueryIntent.SORT, QueryIntent.LOOKUP},
+        question="Show the 10 most recently created products",
+        sql="""
+SELECT
+    product_id,
+    product_name,
+    created_at
+FROM products
+ORDER BY created_at DESC
+LIMIT 10;
+""",
     ),
     PromptExample(
-        question="Total sales by category.",
-        intent=QueryIntent.SHOW_TOTAL_SALES_BY_CATEGORY,
-        sql="SELECT category, SUM(amount) AS total_sales FROM sales GROUP BY category;"
+        intents={QueryIntent.TIME_SERIES, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Daily active users in the last 30 days",
+        sql="""
+SELECT
+    DATE_TRUNC('day', last_login_at) AS day,
+    COUNT(DISTINCT user_id) AS active_users
+FROM user_sessions
+WHERE last_login_at >= CURRENT_DATE - INTERVAL '29 days'
+GROUP BY day
+ORDER BY day;
+""",
     ),
     PromptExample(
-        question="Show the top 5 customers by total purchase amount.",
-        intent=QueryIntent.SHOW_TOP_CUSTOMERS,
-        sql="SELECT customer_id, SUM(total_amount) AS total_purchases FROM orders GROUP BY customer_id ORDER BY total_purchases DESC LIMIT 5;"
+        intents={QueryIntent.JOIN, QueryIntent.COMPARISON, QueryIntent.AGGREGATION},
+        question="Which products have never been ordered",
+        sql="""
+SELECT
+    p.product_id,
+    p.product_name
+FROM products AS p
+LEFT JOIN order_items AS oi
+  ON oi.product_id = p.product_id
+WHERE oi.product_id IS NULL;
+""",
     ),
     PromptExample(
-        question="Show the bottom 5 customers by total purchase amount.",
-        intent=QueryIntent.SHOW_BOTTOM_CUSTOMERS,
-        sql="SELECT customer_id, SUM(total_amount) AS total_purchases FROM orders GROUP BY customer_id ORDER BY total_purchases ASC LIMIT 5;"
+        intents={QueryIntent.AGGREGATION, QueryIntent.GROUP_BY, QueryIntent.FILTER},
+        question="Count orders per status for the current month",
+        sql="""
+SELECT
+    status,
+    COUNT(*) AS order_count
+FROM orders
+WHERE order_date >= DATE_TRUNC('month', CURRENT_DATE)
+  AND order_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+GROUP BY status
+ORDER BY order_count DESC;
+""",
     ),
     PromptExample(
-        question="Show the total number of products.",
-        intent=QueryIntent.SHOW_TOTAL_PRODUCTS,
-        sql="SELECT COUNT(*) AS total_products FROM products;"
+        intents={QueryIntent.SORT, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Top 3 sales reps by revenue this quarter",
+        sql="""
+SELECT
+    o.sales_rep_id,
+    SUM(o.total_amount) AS quarter_revenue
+FROM orders AS o
+WHERE o.order_date >= DATE_TRUNC('quarter', CURRENT_DATE)
+  AND o.order_date < DATE_TRUNC('quarter', CURRENT_DATE) + INTERVAL '3 months'
+GROUP BY o.sales_rep_id
+ORDER BY quarter_revenue DESC
+LIMIT 3;
+""",
     ),
     PromptExample(
-        question="Show the total number of customers.",
-        intent=QueryIntent.SHOW_TOTAL_CUSTOMERS,
-        sql="SELECT COUNT(*) AS total_customers FROM customers;"
+        intents={QueryIntent.COMPARISON, QueryIntent.TIME_SERIES, QueryIntent.AGGREGATION},
+        question="Month-over-month revenue change",
+        sql="""
+WITH monthly_revenue AS (
+    SELECT
+        DATE_TRUNC('month', order_date) AS month,
+        SUM(total_amount) AS revenue
+    FROM orders
+    GROUP BY month
+)
+SELECT
+    month,
+    revenue,
+    revenue - LAG(revenue) OVER (ORDER BY month) AS revenue_change
+FROM monthly_revenue
+ORDER BY month;
+""",
     ),
     PromptExample(
-        question="Show customer names and their orders.",
-        intent=QueryIntent.SHOW_CUSTOMER_ORDERS_DETAILS,
-        sql="SELECT c.name, o.* FROM customers c JOIN orders o ON c.customer_id = o.customer_id;"
+        intents={QueryIntent.GROUP_BY, QueryIntent.AGGREGATION},
+        question="Average delivery time by shipping method",
+        sql="""
+SELECT
+    shipping_method,
+    AVG(EXTRACT(EPOCH FROM (delivered_at - shipped_at)) / 3600.0) AS avg_delivery_hours
+FROM shipments
+WHERE delivered_at IS NOT NULL
+GROUP BY shipping_method
+ORDER BY avg_delivery_hours;
+""",
     ),
     PromptExample(
-        question="Show all orders.",
-        intent=QueryIntent.SHOW_ORDERS,
-        sql="SELECT * FROM orders;"
+        intents={QueryIntent.JOIN, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Revenue by product category in 2025",
+        sql="""
+SELECT
+    p.category,
+    SUM(oi.quantity * oi.unit_price) AS category_revenue
+FROM order_items AS oi
+JOIN orders AS o
+  ON o.order_id = oi.order_id
+JOIN products AS p
+  ON p.product_id = oi.product_id
+WHERE o.order_date >= DATE '2025-01-01'
+  AND o.order_date < DATE '2026-01-01'
+GROUP BY p.category
+ORDER BY category_revenue DESC;
+""",
     ),
     PromptExample(
-        question="Show all products.",
-        intent=QueryIntent.SHOW_PRODUCTS,
-        sql="SELECT * FROM products;"
+        intents={QueryIntent.FILTER, QueryIntent.LOOKUP, QueryIntent.SORT},
+        question="Show high-priority open support tickets",
+        sql="""
+SELECT
+    ticket_id,
+    subject,
+    created_at
+FROM support_tickets
+WHERE priority = 'high'
+  AND status <> 'closed'
+ORDER BY created_at ASC;
+""",
     ),
     PromptExample(
-        question="Show customer orders.",
-        intent=QueryIntent.SHOW_CUSTOMER_ORDERS,
-        sql="SELECT * FROM orders WHERE customer_id = ?;"
+        intents={QueryIntent.TIME_SERIES, QueryIntent.COMPARISON, QueryIntent.AGGREGATION},
+        question="Weekly signups this year versus last year",
+        sql="""
+WITH weekly_signups AS (
+    SELECT
+        DATE_TRUNC('week', created_at) AS week_start,
+        EXTRACT(YEAR FROM created_at)::int AS signup_year,
+        COUNT(*) AS signup_count
+    FROM users
+    WHERE created_at >= DATE_TRUNC('year', CURRENT_DATE) - INTERVAL '1 year'
+    GROUP BY week_start, signup_year
+)
+SELECT
+    week_start,
+    COALESCE(SUM(signup_count) FILTER (WHERE signup_year = EXTRACT(YEAR FROM CURRENT_DATE)::int), 0) AS signups_this_year,
+    COALESCE(SUM(signup_count) FILTER (WHERE signup_year = EXTRACT(YEAR FROM CURRENT_DATE)::int - 1), 0) AS signups_last_year
+FROM weekly_signups
+GROUP BY week_start
+ORDER BY week_start;
+""",
     ),
-    PromptExample(
-            question="Count all the orders.",
-            intent=QueryIntent.COUNT_ORDERS,
-            sql="SELECT COUNT(*) AS order_count FROM orders;"
-    ),
-    PromptExample(
-            question="Show order details.",
-            intent=QueryIntent.SHOW_ORDER_DETAILS,
-            sql="SELECT * FROM order_details WHERE order_id = ?;"
-    ),
-    PromptExample(
-            question="Show the total sales per product.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_PRODUCT,
-            sql="SELECT product_id, SUM(quantity * price) AS total_sales FROM order_details GROUP BY product_id;"
-    ),
-    PromptExample(
-            question="Show the average order value.",
-            intent=QueryIntent.SHOW_AVERAGE_ORDER_VALUE,
-            sql="SELECT AVG(total_amount) AS average_order_value FROM orders;"
-    ),
-    PromptExample(
-            question="Show the total revenue.",
-            intent=QueryIntent.SHOW_TOTAL_REVENUE,
-            sql="SELECT SUM(total_amount) AS total_revenue FROM orders;"
-    ),
-    PromptExample(
-            question="Total sales by category.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_BY_CATEGORY,
-            sql="SELECT category, SUM(amount) AS total_sales FROM sales GROUP BY category;"
-    ),
-    PromptExample(
-            question="Show the top 5 customers by total purchase amount.",
-            intent=QueryIntent.SHOW_TOP_5_CUSTOMERS,
-            sql="SELECT customer_id, SUM(total_amount) AS total_purchases FROM orders GROUP BY customer_id ORDER BY total_purchases DESC"
-                LIMIT 5;",
-    ),
-    PromptExample(
-            question="Show the bottom 5 customers by total purchase amount.",
-            intent=QueryIntent.SHOW_BOTTOM_5_CUSTOMERS,
-            sql="SELECT customer_id, SUM(total_amount) AS total_purchases FROM orders GROUP BY customer_id ORDER BY total_purchases ASC LIMIT 5;",
-    ),
-    PromptExample(
-            question="Show the total number of products.",
-            intent=QueryIntent.SHOW_TOTAL_PRODUCTS,
-            sql="SELECT COUNT(*) AS total_products FROM products;",
-    ),
-    PromptExample(
-            question="Show the total number of customers.",
-            intent=QueryIntent.SHOW_TOTAL_CUSTOMERS,
-            sql="SELECT COUNT(*) AS total_customers FROM customers;",
-    ),
-    PromptExample(
-            question="Show customer names and their orders.",
-            intent=QueryIntent.SHOW_CUSTOMER_ORDERS_DETAILS,
-            sql="SELECT c.name, o.* FROM customers c JOIN orders o ON c.customer_id = o.customer_id;",
-    ),
-    PromptExample(
-            question="Show the total sales for each month.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_MONTH,
-            sql="SELECT strftime('%Y-%m', order_date) AS month, SUM(total_amount) AS total_sales FROM orders GROUP BY month;",
-    ),
-    PromptExample(
-            question="Show the total sales for each year.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_YEAR,
-            sql="SELECT strftime('%Y', order_date) AS year, SUM(total_amount) AS total_sales FROM orders GROUP BY year;",
-    ),
-    PromptExample(
-            question="Show the total sales for each quarter.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_QUARTER,
-            sql="SELECT strftime('%Y-Q%q', order_date) AS quarter, SUM(total_amount) AS total_sales FROM orders GROUP BY quarter;",
-    ),
-    PromptExample(
-            question="Show the total sales for each day.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_DAY,
-            sql="SELECT strftime('%Y-%m-%d', order_date) AS day, SUM(total_amount) AS total_sales FROM orders GROUP BY day;",
-    ),
-    PromptExample(
-            question="Top 10 products by revenue.",
-            intent=QueryIntent.SHOW_TOP_10_PRODUCTS_BY_REVENUE,
-            sql="SELECT product_id, SUM(quantity * price) AS total_revenue FROM order_details GROUP BY product_id ORDER BY total_revenue DESC LIMIT 10;",
-    ),
-    PromptExample(
-            question="Show the total sales for each product.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_PRODUCT,
-            sql="SELECT product_id, SUM(quantity * price) AS total_sales FROM order_details GROUP BY product_id;",
-    ),
-    PromptExample(
-            question="Show the total sales for each customer.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_CUSTOMER,   
-            sql="SELECT customer_id, SUM(total_amount) AS total_sales FROM orders GROUP BY customer_id;",   
-    ),
-    PromptExample(
-            question="Show the total sales for each category.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_CATEGORY,
-            sql="SELECT category, SUM(amount) AS total_sales FROM sales GROUP BY category;",
-    ),
-    PromptExample(
-            question="Show the total sales for each region.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_REGION,
-            sql="SELECT region, SUM(amount) AS total_sales FROM sales GROUP BY region;",
-    ),
-    PromptExample(
-            question="Show the total sales for each salesperson.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_SALESPERSON,
-            sql="SELECT salesperson_id, SUM(amount) AS total_sales FROM sales GROUP BY salesperson_id ;",
-    ),
-    PromptExample(
-            question="Show the total sales for each product category.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_PRODUCT_CATEGORY,
-            sql="SELECT p.category, SUM(od.quantity * od.price) AS total_sales FROM order_details od JOIN products p ON od.product_id = p.product_id GROUP BY p.category;",
-    ),
-    PromptExample(
-            question="Show the total sales for each customer region.",
-            intent=QueryIntent.SHOW_TOTAL_SALES_PER_CUSTOMER_REGION,
-            sql="SELECT c.region, SUM(o.total_amount) AS total_sales FROM customers c JOIN  orders o ON c.customer_id = o.customer_id GROUP BY c.region;",
-    ),
-    PromptExample(
-        question="Show the bottom 5 customers by total purchase amount.",
-        intent=QueryIntent.SHOW_BOTTOM_5_CUSTOMERS_BY_TOTAL_PURCHASE_AMOUNT,
-        sql="SELECT customer_id, SUM(total_amount) AS total_purchases
-                FROM orders
-                GROUP BY customer_id
-                ORDER BY total_purchases ASC
-                LIMIT 5;",
-    ),
-    PromptExample(
-        question="Show the total sales for each product.",
-        intent=QueryIntent.SHOW_TOTAL_SALES_PER_PRODUCT,
-        sql="SELECT product_id, SUM(quantity * price) AS total_sales
-                FROM order_details
-                GROUP BY product_id;",
-    ),
-    PromptExample(
-        question="Show the total sales for each customer.",
-        intent=QueryIntent.SHOW_TOTAL_SALES_PER_CUSTOMER,
-        sql="SELECT customer_id, SUM(total_amount) AS total_sales   
-                FROM orders
-                    GROUP BY customer_id;",
-    ),
-    PromptExample(
-        question="Show the total number of products.",
-        intent=QueryIntent.SHOW_TOTAL_NUMBER_OF_PRODUCTS,
-        sql="SELECT COUNT(*) AS total_products
-                FROM products;",
-    )
 ]

@@ -1,6 +1,7 @@
 from app.models.intent import QueryIntent
 from app.models.intent_analysis import IntentAnalysis
-from app.llm.prompt_examples.examples import EXAMPLES
+from app.models.prompt_example import PromptExample
+
 
 class PromptBuilder:
     """
@@ -31,6 +32,8 @@ Rules:
 - Use aliases where appropriate.
 - Never invent table names.
 - Never invent column names.
+- Prefer foreign-key relationships when joining tables.
+- Generate efficient SQL whenever possible.
 - If insufficient information exists, return:
 
 SELECT 'Insufficient information';
@@ -62,6 +65,10 @@ Include GROUP BY whenever required.
 Use GROUP BY whenever aggregating by categories.
 Ensure all non-aggregated selected columns are grouped.
 """,
+        QueryIntent.FILTER: """
+Apply filtering conditions using WHERE clauses.
+Avoid unnecessary filtering.
+""",
         QueryIntent.SORT: """
 Sort the results appropriately.
 Use ORDER BY.
@@ -91,15 +98,16 @@ Do not make unnecessary assumptions.
         schema: str,
         user_question: str,
         intent: IntentAnalysis,
+        examples: list[PromptExample],
     ) -> str:
         """
-        Build the final prompt sent to the LLM.
+        Construct the final prompt sent to the LLM.
         """
 
         sections = [
             self._system_prompt(),
             self._intent_prompt(intent),
-            self._examples_prompt(),
+            self._examples_prompt(examples),
             self._schema_prompt(schema),
             self._rules_prompt(),
             self._safety_prompt(),
@@ -114,7 +122,7 @@ Do not make unnecessary assumptions.
         content: str,
     ) -> str:
         """
-        Build a formatted prompt section.
+        Create a formatted prompt section.
         """
 
         return f"""
@@ -158,6 +166,39 @@ Do not make unnecessary assumptions.
             "\n\n".join(instructions),
         )
 
+    def _examples_prompt(
+        self,
+        examples: list[PromptExample],
+    ) -> str:
+        """
+        Format retrieved few-shot examples.
+        """
+
+        if not examples:
+            return self._section(
+                "EXAMPLES",
+                "No examples available.",
+            )
+
+        formatted_examples = []
+
+        for example in examples:
+
+            formatted_examples.append(
+                f"""
+Question:
+{example.question}
+
+SQL:
+{example.sql}
+""".strip()
+            )
+
+        return self._section(
+            "EXAMPLES",
+            "\n\n".join(formatted_examples),
+        )
+
     def _schema_prompt(
         self,
         schema: str,
@@ -191,25 +232,3 @@ Do not make unnecessary assumptions.
 SQL:
 """,
         )
-    
-    def _examples_prompt(self) -> str:
-        
-        sections = []
-        for example in EXAMPLES:
-            sections.append(
-                f"""
-Question: {example['question']}
-
-SQL: {example['sql']}
-""".strip()
-            )
-        return self._section(
-            "EXAMPLES",
-            "\n\n".join(sections),
-        )
-    
-    def build_prompt(self, schema: str, user_question: str, intent: IntentAnalysis, examples: list[PromptExample]) -> str:
-        
-        pass
-    
-    def _examples_prompt(self, examples: list[PromptExample]) -> str:

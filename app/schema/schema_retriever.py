@@ -1,7 +1,7 @@
 import re
 from app.core.config import (
-    SCHEMA_RETRIEVER_MIN_SCORE,
-    SCHEMA_RETRIEVER_TOP_K,
+    settings.schema_retriever_min_score,
+    settings.schema_retriever_top_k,
 )
 class SchemaRetriever:
     """
@@ -13,7 +13,7 @@ class SchemaRetriever:
     COLUMN_EXACT_MATCH = 6
     COLUMN_PARTIAL_MATCH = 3
     
-    def retrieve(self, schema: dict, question: str, top_k: int = SCHEMA_RETRIEVER_TOP_K) -> dict:
+    def retrieve(self, schema: dict, question: str, top_k: int = settings.settings.settings.settings.settings.settings.settings.settings.settings.settings.settings.settings.settings.schema_retriever_top_kver_top_kver_top_kver_top_kver_top_k) -> dict:
         """
         Retrieve the most relevant tables from the schema based on the question.
         """
@@ -51,7 +51,7 @@ class SchemaRetriever:
         filtered_scores = {
             table: score
             for table, score in scores.items()
-            if score >= SCHEMA_RETRIEVER_MIN_SCORE
+            if score >= settings.settings.schema_retriever_min_score
         }
         #fallback if nothing passes the minimum score, return the first top_k tables in the schema
         if not filtered_scores:
