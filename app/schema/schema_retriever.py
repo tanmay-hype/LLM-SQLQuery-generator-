@@ -1,5 +1,5 @@
 from app.schema.retrievers.keyword_retriever import KeywordRetriever
-
+from app.schema.models.retrieval_result import RetrievalResult
 
 class SchemaRetriever:
     """
@@ -14,12 +14,13 @@ class SchemaRetriever:
         self,
         schema: dict,
         question: str,
-    ) -> dict:
+    ) -> RetrievalResult:
         """
         Retrieve the relevant schema using the configured strategy.
         """
-
-        return self.keyword_retriever.retrieve(
+        result = self.keyword_retriever.retrieve(
             schema=schema,
             question=question,
         )
+    
+        return result.schema

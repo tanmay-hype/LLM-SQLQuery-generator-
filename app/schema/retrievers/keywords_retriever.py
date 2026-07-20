@@ -1,8 +1,10 @@
 import re
 
+from sqlalchemy import table
+
 from app.core.config import settings
 from app.schema.retrievers.base import BaseSchemaRetriever
-
+from app.schema.models.retrieval_result import RetrievalResult
 
 class KeywordRetriever(BaseSchemaRetriever):
     """
@@ -21,7 +23,7 @@ class KeywordRetriever(BaseSchemaRetriever):
         schema: dict,
         question: str,
         top_k: int = settings.schema_retriever_top_k,
-    ) -> dict:
+    ) -> RetrievalResult:
         """
         Retrieve the most relevant tables from the schema.
         """
@@ -38,16 +40,22 @@ class KeywordRetriever(BaseSchemaRetriever):
             scores,
             top_k,
         )
-
+       
         selected_tables = self._expand_related_tables(
             schema,
             set(selected_schema.keys()),
         )
-
-        return {
+        
+        final_schema = {
             table: schema[table]
             for table in selected_tables
         }
+
+
+        return RetrievalResult(
+            schema=selected_schema,
+            scores=scores
+        )
 
     def _tokenize(
         self,
