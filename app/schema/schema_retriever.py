@@ -1,4 +1,4 @@
-from app.schema.retrievers.keyword_retriever import KeywordRetriever
+from app.schema.retrievers.keywords_retriever import KeywordsRetriever
 from app.schema.models.retrieval_result import RetrievalResult
 
 class SchemaRetriever:
@@ -7,8 +7,7 @@ class SchemaRetriever:
     """
 
     def __init__(self):
-
-        self.keyword_retriever = KeywordRetriever()
+        self.keyword_retriever = KeywordsRetriever()
 
     def retrieve(
         self,

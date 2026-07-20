@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.schema.retrievers.base import BaseSchemaRetriever
 from app.schema.models.retrieval_result import RetrievalResult
 
-class KeywordRetriever(BaseSchemaRetriever):
+class KeywordsRetriever(BaseSchemaRetriever):
     """
     Retrieves the most relevant tables from the schema
     using keyword matching.
