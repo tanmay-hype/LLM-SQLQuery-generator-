@@ -1,5 +1,6 @@
 from app.schema.models.retrieval_result import RetrievalResult
-from app.schema.retrievers.keyword_retriever import KeywordRetriever
+from app.schema.models.schema_document import SchemaDocument
+from app.schema.retrievers.keywords_retriever import KeywordRetriever
 
 
 class SchemaRetriever:
@@ -17,6 +18,7 @@ class SchemaRetriever:
         self,
         schema: dict,
         question: str,
+        documents: list[SchemaDocument],
     ) -> dict:
         """
         Execute all retrieval strategies and merge the results.
@@ -31,6 +33,7 @@ class SchemaRetriever:
                 retriever.retrieve(
                     schema=schema,
                     question=question,
+                    documents=documents,
                 )
 
             )

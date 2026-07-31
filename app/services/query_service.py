@@ -17,7 +17,7 @@ from app.schema.schema_retriever import SchemaRetriever
 from app.services.intent_detector import IntentDetector
 from app.services.sql_executor import SQLExecutor
 from app.services.validator import SQLValidator
-
+from app.schema.schema_document_builder import SchemaDocumentBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,8 @@ class QueryService:
         self.schema_loader = SchemaLoader(db_engine)
         self.schema_retriever = SchemaRetriever()
         self.schema_formatter = SchemaFormatter()
+        self.schema_document_builder = SchemaDocumentBuilder()
+
 
         self.intent_detector = IntentDetector()
 
@@ -57,6 +59,9 @@ class QueryService:
         logger.info("Loading database schema...")
 
         schema = self.schema_loader.load_schema()
+        
+        logger.info("Building schema documents...")
+        documents = self.schema_document_builder.build(schema)
 
         logger.info("Detecting query intent...")
 
@@ -69,6 +74,7 @@ class QueryService:
         relevant_schema = self.schema_retriever.retrieve(
             schema=schema,
             question=question,
+            documents=documents,
         )
 
         logger.info("Formatting schema...")

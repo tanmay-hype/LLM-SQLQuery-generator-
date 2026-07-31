@@ -3,6 +3,7 @@ import re
 from sqlalchemy import table
 
 from app.core.config import settings
+from app.schema.models.schema_document import SchemaDocument
 from app.schema.retrievers.base import BaseSchemaRetriever
 from app.schema.models.retrieval_result import RetrievalResult
 
@@ -22,6 +23,7 @@ class KeywordsRetriever(BaseSchemaRetriever):
         self,
         schema: dict,
         question: str,
+        documents: list[SchemaDocument],
         top_k: int = settings.schema_retriever_top_k,
     ) -> RetrievalResult:
         """
