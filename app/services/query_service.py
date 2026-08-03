@@ -18,6 +18,7 @@ from app.services.intent_detector import IntentDetector
 from app.services.sql_executor import SQLExecutor
 from app.services.validator import SQLValidator
 from app.schema.schema_document_builder import SchemaDocumentBuilder
+from app.schema.compression.schema_compressor import SchemaCompressor
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class QueryService:
         self.schema_retriever = SchemaRetriever()
         self.schema_formatter = SchemaFormatter()
         self.schema_document_builder = SchemaDocumentBuilder()
-
+        self.schema_compressor = SchemaCompressor()
 
         self.intent_detector = IntentDetector()
 
@@ -77,10 +78,18 @@ class QueryService:
             documents=documents,
         )
 
-        logger.info("Formatting schema...")
+        logger.info("compressing schema...")
+        
+        compressed_schema = self.schema_compressor.compress(
+            schema = relevant_schema,
+            question = question,
+            intent = intent_analysis,
 
+        )
+        
+        logger.info("Formatting schema for prompt...")
         formatted_schema = self.schema_formatter.format(
-            relevant_schema
+            compressed_schema
         )
 
         logger.info("Retrieving prompt examples...")
