@@ -97,3 +97,6 @@ GEMINI_API_KEY = settings.gemini_api_key
 GEMINI_MODEL = settings.gemini_model
 OLLAMA_BASE_URL = settings.ollama_base_url
 OLLAMA_MODEL = settings.ollama_model
+SQL_CORRECTION_MAX_ATTEMPTS = int(
+    os.getenv("SQL_CORRECTION_MAX_ATTEMPTS", 1)
+)

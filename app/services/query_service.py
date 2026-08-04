@@ -4,6 +4,8 @@ from app.core.database import engine
 
 from app.llm.prompt_builder import PromptBuilder
 from app.llm.sql_generator import SQLGenerator
+from app.llm.sql_corrector import SQLCorrector
+from app.exceptions import SQLValidationError
 
 from app.llm.prompt_examples.repository import ExampleRepository
 from app.llm.prompt_examples.retriever import ExampleRetriever
@@ -19,6 +21,8 @@ from app.services.sql_executor import SQLExecutor
 from app.services.validator import SQLValidator
 from app.schema.schema_document_builder import SchemaDocumentBuilder
 from app.schema.compression.schema_compressor import SchemaCompressor
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,7 @@ class QueryService:
 
         self.prompt_builder = PromptBuilder()
         self.sql_generator = SQLGenerator()
+        self.sql_corrector = SQLCorrector()
 
         self.sql_validator = SQLValidator()
         self.sql_executor = SQLExecutor()
@@ -61,7 +66,7 @@ class QueryService:
 
         schema = self.schema_loader.load_schema()
         
-        logger.info("Building schema documents...")
+        logger.debug("Building schema documents...")
         documents = self.schema_document_builder.build(schema)
 
         logger.info("Detecting query intent...")
@@ -78,7 +83,7 @@ class QueryService:
             documents=documents,
         )
 
-        logger.info("compressing schema...")
+        logger.info("Compressing schema...")
         
         compressed_schema = self.schema_compressor.compress(
             schema = relevant_schema,
@@ -114,11 +119,28 @@ class QueryService:
         )
 
         logger.info("Validating generated SQL...")
-
-        validated_sql = self.sql_validator.validate(
-            sql,
-            schema,
-        )
+        
+        try:
+            validated_sql = self.sql_validator.validate(
+                sql,
+                schema,
+            )
+        
+        except SQLValidationError as exc:
+            logger.warning("Generated SQL is invalid. Attempting correction...")
+            
+            corrected_sql = self.sql_corrector.correct(
+                question=question,
+                schema=formatted_schema,
+                invalid_sql=sql,
+                validation_error=str(exc),
+            )
+            
+            logger.info("Validating corrected SQL...")
+            validated_sql = self.sql_validator.validate(
+                corrected_sql,
+                schema,
+            )
 
         logger.info("Executing SQL...")
 
