@@ -101,3 +101,8 @@ OLLAMA_MODEL = settings.ollama_model
 SQL_CORRECTION_MAX_ATTEMPTS = int(
     os.getenv("SQL_CORRECTION_MAX_ATTEMPTS", 1)
 )
+schema_retrieval_strategy: str = "keyword"
+SCHEMA_RETRIEVAL_STRATEGY = os.getenv(
+    "SCHEMA_RETRIEVAL_STRATEGY",
+    "keyword",
+)

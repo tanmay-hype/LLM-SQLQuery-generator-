@@ -1,5 +1,9 @@
+from app.core.config import settings
+
 from app.schema.models.retrieval_result import RetrievalResult
 from app.schema.models.schema_document import SchemaDocument
+from app.schema.models.retrieval_strategy import RetrievalStrategy
+
 from app.schema.retrievers.keywords_retriever import KeywordRetriever
 
 
@@ -10,9 +14,37 @@ class SchemaRetriever:
 
     def __init__(self):
 
-        self.retrievers = [
-            KeywordRetriever(),
-        ]
+        self.strategy = RetrievalStrategy(
+            settings.schema_retrieval_strategy
+        )
+
+        self.retrievers = self._build_retrievers()
+
+    def _build_retrievers(self):
+        """
+        Build the retriever pipeline based on the configured strategy.
+        """
+
+        if self.strategy == RetrievalStrategy.KEYWORD:
+            return [
+                KeywordRetriever(),
+            ]
+
+        elif self.strategy == RetrievalStrategy.SEMANTIC:
+            # Will be implemented later
+            raise NotImplementedError(
+                "Semantic retrieval is not implemented yet."
+            )
+
+        elif self.strategy == RetrievalStrategy.HYBRID:
+            # Will be implemented later
+            raise NotImplementedError(
+                "Hybrid retrieval is not implemented yet."
+            )
+
+        raise ValueError(
+            f"Unknown retrieval strategy: {self.strategy}"
+        )
 
     def retrieve(
         self,
@@ -21,22 +53,20 @@ class SchemaRetriever:
         documents: list[SchemaDocument],
     ) -> dict:
         """
-        Execute all retrieval strategies and merge the results.
+        Execute all configured retrieval strategies.
         """
 
         results = []
 
         for retriever in self.retrievers:
 
-            results.append(
-
-                retriever.retrieve(
-                    schema=schema,
-                    question=question,
-                    documents=documents,
-                )
-
+            result = retriever.retrieve(
+                schema=schema,
+                question=question,
+                documents=documents,
             )
+
+            results.append(result)
 
         merged = self._merge_results(results)
 
@@ -49,9 +79,14 @@ class SchemaRetriever:
         """
         Merge retrieval results.
 
-        Currently returns the keyword retrieval.
-
-        Later this will perform score fusion.
+        Currently returns the first result.
+        Later this will implement Reciprocal Rank Fusion (RRF)
+        or weighted score fusion.
         """
+
+        if not results:
+            raise ValueError(
+                "No retrieval results were produced."
+            )
 
         return results[0]
