@@ -8,6 +8,7 @@ class SchemaIndexService:
     """
 
     def __init__(self, embedding_service: EmbeddingService, vecotr_store: BaseVectorStore):
+        self._initialized = False
         self.embedding_service = embedding_service
         self.vector_store = vecotr_store
     
@@ -23,4 +24,15 @@ class SchemaIndexService:
     
         embedding = self.embedding_service.embed([question])[0]
         return self.vector_store.search(embedding, top_k)
+    
+    def initialize(self, documents: list[SchemaDocument]):
+        """
+        Initializes the index service by indexing the provided schema documents.
+        """
+        if self._initialized:
+            return
+        
+        self.build_index(documents)
+        self._initialized = True
+        
     
