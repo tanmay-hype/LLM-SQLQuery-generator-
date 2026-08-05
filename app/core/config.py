@@ -106,3 +106,8 @@ SCHEMA_RETRIEVAL_STRATEGY = os.getenv(
     "SCHEMA_RETRIEVAL_STRATEGY",
     "keyword",
 )
+gemini_embedding_model: str = "gemini-embedding-001"
+GEMINI_EMBEDDING_MODEL = os.getenv(
+    "GEMINI_EMBEDDING_MODEL",
+    "gemini-embedding-001",
+)
