@@ -1,5 +1,4 @@
 from functools import lru_cache
-import os
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,71 +11,80 @@ class Settings(BaseSettings):
     Application configuration.
     """
 
-    # --------------------------------------------------
+    # ==================================================
     # Application
-    # --------------------------------------------------
+    # ==================================================
 
     app_name: str = "LLM SQL Generator"
-
     debug: bool = False
 
-    # --------------------------------------------------
+    # ==================================================
     # Database
-    # --------------------------------------------------
+    # ==================================================
 
     database_url: str = "sqlite:///./app.db"
 
     postgres_user: str = "postgres"
-
     postgres_password: str = "postgres"
-
     postgres_db: str = "llm_sql"
 
-    # --------------------------------------------------
-    # LLM Providers
-    # --------------------------------------------------
+    # ==================================================
+    # OpenAI
+    # ==================================================
 
     openai_api_key: str = ""
-
     openai_model: str = "gpt-4.1"
 
-    # Compatibility with existing env key MODEL_NAME.
+    # Backward compatibility
     model_name: str = "gpt-4.1"
 
-    gemini_api_key: str = ""
+    # ==================================================
+    # Gemini
+    # ==================================================
 
+    gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-pro"
 
-    ollama_base_url: str = "http://localhost:11434"
+    gemini_embedding_model: str = "text-embedding-004"
 
+    # ==================================================
+    # Ollama
+    # ==================================================
+
+    ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5-coder:14b"
 
-    # --------------------------------------------------
+    # ==================================================
     # Schema Retrieval
-    # --------------------------------------------------
+    # ==================================================
 
     schema_retriever_top_k: int = 5
-
     schema_retriever_min_score: int = 5
 
-    # Backward-compatible aliases for existing env keys.
+    # Backward-compatible aliases
     schema_retrieval_top_k: int = 5
-
     schema_retrieval_min_score: int = 5
 
-    # --------------------------------------------------
+    schema_retrieval_strategy: str = "keyword"
+
+    # ==================================================
     # Example Retrieval
-    # --------------------------------------------------
+    # ==================================================
 
     example_retriever_top_k: int = 3
-
     example_retriever_min_score: int = 3
 
-    # --------------------------------------------------
+    # ==================================================
     # Prompt Generation
-    # --------------------------------------------------
+    # ==================================================
 
     max_prompt_examples: int = 3
+
+    # ==================================================
+    # SQL Correction
+    # ==================================================
+
+    sql_correction_max_attempts: int = 1
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -91,23 +99,22 @@ def get_settings() -> Settings:
 
 settings = get_settings()
 
-# Module-level aliases used by existing imports.
+
+# -------------------------------------------------------------------
+# Backward-compatible aliases (optional)
+# These allow older modules to continue working while you refactor.
+# -------------------------------------------------------------------
+
 OPENAI_API_KEY = settings.openai_api_key
 OPENAI_MODEL = settings.openai_model
+
 GEMINI_API_KEY = settings.gemini_api_key
 GEMINI_MODEL = settings.gemini_model
+GEMINI_EMBEDDING_MODEL = settings.gemini_embedding_model
+
 OLLAMA_BASE_URL = settings.ollama_base_url
 OLLAMA_MODEL = settings.ollama_model
-SQL_CORRECTION_MAX_ATTEMPTS = int(
-    os.getenv("SQL_CORRECTION_MAX_ATTEMPTS", 1)
-)
-schema_retrieval_strategy: str = "keyword"
-SCHEMA_RETRIEVAL_STRATEGY = os.getenv(
-    "SCHEMA_RETRIEVAL_STRATEGY",
-    "keyword",
-)
-gemini_embedding_model: str = "gemini-embedding-004"
-GEMINI_EMBEDDING_MODEL = os.getenv(
-    "GEMINI_EMBEDDING_MODEL",
-    "gemini-embedding-004",
-)
+
+SCHEMA_RETRIEVAL_STRATEGY = settings.schema_retrieval_strategy
+
+SQL_CORRECTION_MAX_ATTEMPTS = settings.sql_correction_max_attempts
