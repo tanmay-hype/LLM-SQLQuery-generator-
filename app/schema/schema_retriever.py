@@ -1,50 +1,20 @@
-from app.core.config import settings
-
+from app.schema.fusion.rrf import ReciprocalRankFusion
 from app.schema.models.retrieval_result import RetrievalResult
 from app.schema.models.schema_document import SchemaDocument
-from app.schema.models.retrieval_strategy import RetrievalStrategy
-
-from app.schema.retrievers.keywords_retriever import KeywordRetriever
+from app.schema.retrievers.base import BaseSchemaRetriever
 
 
 class SchemaRetriever:
     """
-    Coordinates all schema retrieval strategies.
+    Coordinates all configured schema retrieval strategies.
     """
 
-    def __init__(self):
-
-        self.strategy = RetrievalStrategy(
-            settings.schema_retrieval_strategy
-        )
-
-        self.retrievers = self._build_retrievers()
-
-    def _build_retrievers(self):
-        """
-        Build the retriever pipeline based on the configured strategy.
-        """
-
-        if self.strategy == RetrievalStrategy.KEYWORD:
-            return [
-                KeywordRetriever(),
-            ]
-
-        elif self.strategy == RetrievalStrategy.SEMANTIC:
-            # Will be implemented later
-            raise NotImplementedError(
-                "Semantic retrieval is not implemented yet."
-            )
-
-        elif self.strategy == RetrievalStrategy.HYBRID:
-            # Will be implemented later
-            raise NotImplementedError(
-                "Hybrid retrieval is not implemented yet."
-            )
-
-        raise ValueError(
-            f"Unknown retrieval strategy: {self.strategy}"
-        )
+    def __init__(
+        self,
+        retrievers: list[BaseSchemaRetriever],
+    ):
+        self.retrievers = retrievers
+        self.fusion = ReciprocalRankFusion()
 
     def retrieve(
         self,
@@ -53,10 +23,11 @@ class SchemaRetriever:
         documents: list[SchemaDocument],
     ) -> dict:
         """
-        Execute all configured retrieval strategies.
+        Execute all configured retrieval strategies and
+        merge their results using Reciprocal Rank Fusion (RRF).
         """
 
-        results = []
+        results: list[RetrievalResult] = []
 
         for retriever in self.retrievers:
 
@@ -77,11 +48,7 @@ class SchemaRetriever:
         results: list[RetrievalResult],
     ) -> RetrievalResult:
         """
-        Merge retrieval results.
-
-        Currently returns the first result.
-        Later this will implement Reciprocal Rank Fusion (RRF)
-        or weighted score fusion.
+        Merge retrieval results using Reciprocal Rank Fusion.
         """
 
         if not results:
@@ -89,4 +56,4 @@ class SchemaRetriever:
                 "No retrieval results were produced."
             )
 
-        return results[0]
+        return self.fusion.fuse(results)
