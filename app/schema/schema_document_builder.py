@@ -47,6 +47,7 @@ class SchemaDocumentBuilder:
             documents.append(
 
                 SchemaDocument(
+                    id = table_name,
                     table_name=table_name,
                     content=content,
                     metadata={
