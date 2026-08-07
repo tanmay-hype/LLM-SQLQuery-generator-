@@ -12,17 +12,17 @@ class SchemaIndexService:
         self.embedding_service = embedding_service
         self.vector_store = vecotr_store
     
-    def index(self, documents: list[SchemaDocument]):
+    def add(self, documents: list[SchemaDocument]) ->None:
         """
         Indexes the given schema documents into the vector store.
         """
         texts = [document.content for document in documents]
-        embeddings = self.embedding_service.embed(texts)
-        self.vector_store.index(documents, embeddings)
+        embeddings = self.embedding_service.create_embeddings(texts)
+        self.vector_store.add(documents, embeddings)
     
     def search(self, question: str, top_k: int) -> list[SchemaDocument]:
-    
-        embedding = self.embedding_service.embed([question])[0]
+
+        embedding = self.embedding_service.create_embeddings([question])[0]
         return self.vector_store.search(embedding, top_k)
     
     def initialize(self, documents: list[SchemaDocument]):
