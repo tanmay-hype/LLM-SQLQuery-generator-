@@ -4,4 +4,4 @@ from app.schema.models.schema_document import SchemaDocument
 @dataclass
 class SemanticMatch:
     document: SchemaDocument
-    similarity: float
+    score: float

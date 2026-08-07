@@ -1,40 +1,58 @@
 from app.core.config import settings
+
+from app.schema.embeddings.base import EmbeddingService
 from app.schema.models.retrieval_result import RetrievalResult
 from app.schema.models.schema_document import SchemaDocument
+from app.schema.models.semantic_match import SemanticMatch
 from app.schema.retrievers.base import BaseSchemaRetriever
-from app.schema.indexing.schema_index_service import SchemaIndexService
+from app.schema.vector_store.base import BaseVectorStore
 
 
 class SemanticRetriever(BaseSchemaRetriever):
     """
-    Implements semantic retrieval strategy for schema documents.
+    Retrieves relevant schema using semantic similarity.
     """
-    def __init__(self, index_service: SchemaIndexService):
-        self.index_service = index_service
+
+    def __init__(
+        self,
+        embedding_service: EmbeddingService,
+        vector_store: BaseVectorStore,
+    ):
+        self.embedding_service = embedding_service
+        self.vector_store = vector_store
 
     def retrieve(
         self,
         schema: dict,
         question: str,
         documents: list[SchemaDocument],
-        top_k: int = settings.schema_retriever_top_k
     ) -> RetrievalResult:
-        """
-        Retrieve the highest-scoring prompt examples based on semantic analysis.
-        """
-        matches = self.index_service.search(question=question, top_k=top_k)
-        
+
+        embedding = self.embedding_service.create_embeddings(
+            [question]
+        )[0]
+
+        matches = self.vector_store.search(
+            embedding,
+            settings.schema_retrieval_top_k,
+        )
+
         selected_schema = {}
+
         scores = {}
-        
+
         for match in matches:
-            table_name = match.document.table_name
-            if table_name in schema:
-                selected_schema[table_name] = schema[table_name]
-                scores[table_name] = match.score
-        
+
+            table = match.document.table_name
+
+            if table not in schema:
+                continue
+
+            selected_schema[table] = schema[table]
+
+            scores[table] = match.score
+
         return RetrievalResult(
             schema=selected_schema,
-            scores=scores
+            scores=scores,
         )
-      
