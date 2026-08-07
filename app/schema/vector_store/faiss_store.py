@@ -1,8 +1,9 @@
 import os
 
 import faiss
+from pathlib import Path
 import numpy as np
-
+from app.schema.persistence.metadata_store import MetadataStore
 from app.schema.models.schema_document import SchemaDocument
 from app.schema.models.semantic_match import SemanticMatch
 from app.schema.vector_store.base import BaseVectorStore
@@ -16,6 +17,7 @@ class FAISSVectorStore(BaseVectorStore):
     def __init__(self):
         self.index = None
         self.documents: list[SchemaDocument] = []
+        self.metadata_store = MetadataStore()
 
     def add(
         self,
@@ -88,11 +90,14 @@ class FAISSVectorStore(BaseVectorStore):
 
     def save(
         self,
-        path: str,
+        index_path: str,
+        metadata_path: str,
     ) -> None:
-        """
-        Save the FAISS index to disk.
-        """
+        
+        Path(index_path).parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
         if self.index is None:
             raise RuntimeError(
@@ -101,28 +106,44 @@ class FAISSVectorStore(BaseVectorStore):
 
         faiss.write_index(
             self.index,
-            path,
+            index_path,
+        )
+
+        self.metadata_store.save(
+            metadata_path,
+            self.documents,
         )
 
     def load(
         self,
-        path: str,
+        index_path: str,
+        metadata_path: str,
     ) -> None:
-        """
-        Load a FAISS index from disk.
-        """
+        if not os.path.exists(index_path):
+            raise FileNotFoundError(
+                f"FAISS index file not found at {index_path}"
+            )
 
-        if not os.path.exists(path):
-            raise FileNotFoundError(path)
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(
+                f"Metadata file not found at {metadata_path}"
+            )
 
-        self.index = faiss.read_index(path)
+        self.index = faiss.read_index(index_path)
+
+        self.documents = self.metadata_store.load(
+            metadata_path,
+        )
+        
+        
 
     def exists(
         self,
-        path: str,
+        index_path: str,
+        metadata_path: str,
     ) -> bool:
         """
         Check whether a persisted index exists.
         """
 
-        return os.path.exists(path)
+        return (os.path.exists(index_path) and os.path.exists(metadata_path))

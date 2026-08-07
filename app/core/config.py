@@ -79,6 +79,14 @@ class Settings(BaseSettings):
     # ==================================================
 
     max_prompt_examples: int = 3
+    
+    # --------------------------------------------------
+    # Vector Index
+    # --------------------------------------------------
+
+    faiss_index_path: str = "./storage/schema.index"
+
+    schema_metadata_path: str = "./storage/schema_metadata.json"
 
     # ==================================================
     # SQL Correction

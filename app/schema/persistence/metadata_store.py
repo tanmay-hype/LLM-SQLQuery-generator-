@@ -6,7 +6,7 @@ from app.schema.models.schema_document import SchemaDocument
 
 class MetadataStore:
     """
-    Persists schema documents alongside the FAISS index.
+    Persists SchemaDocument metadata alongside the FAISS index.
     """
 
     def save(
@@ -15,20 +15,21 @@ class MetadataStore:
         documents: list[SchemaDocument],
     ) -> None:
 
-        data = []
+        payload = []
 
         for document in documents:
 
-            data.append(
+            payload.append(
                 {
                     "id": document.id,
+                    "table_name": document.table_name,
                     "content": document.content,
-                    "table": document.table,
+                    "metadata": document.metadata,
                 }
             )
 
         Path(path).write_text(
-            json.dumps(data, indent=4),
+            json.dumps(payload, indent=4),
             encoding="utf-8",
         )
 
@@ -39,7 +40,7 @@ class MetadataStore:
 
         raw = json.loads(
             Path(path).read_text(
-                encoding="utf-8",
+                encoding="utf-8"
             )
         )
 
@@ -50,8 +51,9 @@ class MetadataStore:
             documents.append(
                 SchemaDocument(
                     id=item["id"],
+                    table_name=item["table_name"],
                     content=item["content"],
-                    table=item["table"],
+                    metadata=item.get("metadata", {}),
                 )
             )
 
