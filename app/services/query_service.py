@@ -1,5 +1,6 @@
 import logging
 
+from app.core.config import settings
 from app.core.database import engine
 
 from app.exceptions import SQLValidationError
@@ -16,6 +17,7 @@ from app.models.response import SQLResponse
 from app.schema.compression.schema_compressor import SchemaCompressor
 from app.schema.embeddings.gemini_embedding_service import GeminiEmbeddingService
 from app.schema.indexing.schema_index_service import SchemaIndexService
+from app.schema.models.schema_document import SchemaDocument
 from app.schema.retrievers.keywords_retriever import KeywordRetriever
 from app.schema.retrievers.semantic_retriever import SemanticRetriever
 from app.schema.schema_document_builder import SchemaDocumentBuilder
@@ -221,4 +223,15 @@ class QueryService:
         return SQLResponse(
             sql=validated_sql,
             results=results,
+        )
+        
+    def rebuild( self, documents: list[SchemaDocument]) -> None:
+        """
+        Rebuilds the semantic index from the provided documents.
+        """
+        self.build(documents)
+        
+        self.vector_vector.save(
+            settings.faiss_index_path,
+            settings.schema_metadata_path,
         )
