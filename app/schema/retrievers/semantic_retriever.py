@@ -1,58 +1,107 @@
 from app.core.config import settings
 
-from app.schema.embeddings.base import EmbeddingService
 from app.schema.models.retrieval_result import RetrievalResult
 from app.schema.models.schema_document import SchemaDocument
-from app.schema.models.semantic_match import SemanticMatch
-from app.schema.retrievers.base import BaseSchemaRetriever
-from app.schema.vector_store.base import BaseVectorStore
+from app.schema.models.retrieval_strategy import RetrievalStrategy
+
+from app.schema.retrievers.keywords_retriever import KeywordRetriever
+from app.schema.retrievers.semantic_retriever import SemanticRetriever
+
+from app.schema.embeddings.gemini_embedding_service import (
+    GeminiEmbeddingService,
+)
+
+from app.schema.vector_store.faiss_store import FAISSVectorStore
+
+from app.schema.fusion.rrf import ReciprocalRankFusion
 
 
-class SemanticRetriever(BaseSchemaRetriever):
+class SchemaRetriever:
     """
-    Retrieves relevant schema using semantic similarity.
+    Coordinates keyword, semantic, and hybrid schema retrieval.
     """
 
-    def __init__(
-        self,
-        embedding_service: EmbeddingService,
-        vector_store: BaseVectorStore,
-    ):
+    def __init__(self, embedding_service, vector_store):
+
+        self.strategy = RetrievalStrategy(
+            settings.schema_retrieval_strategy
+        )
+
+        self.fusion = ReciprocalRankFusion()
+
         self.embedding_service = embedding_service
+
         self.vector_store = vector_store
+
+        self.retrievers = self._build_retrievers()
+
+    def _build_retrievers(self):
+        """
+        Build retrievers according to the configured strategy.
+        """
+
+        keyword_retriever = KeywordRetriever()
+
+        semantic_retriever = SemanticRetriever(
+            embedding_service=self.embedding_service,
+            vector_store=self.vector_store,
+        )
+
+        if self.strategy == RetrievalStrategy.KEYWORD:
+
+            return [
+                keyword_retriever,
+            ]
+
+        if self.strategy == RetrievalStrategy.SEMANTIC:
+
+            return [
+                semantic_retriever,
+            ]
+
+        if self.strategy == RetrievalStrategy.HYBRID:
+
+            return [
+                keyword_retriever,
+                semantic_retriever,
+            ]
+
+        raise ValueError(
+            f"Unknown retrieval strategy: {self.strategy}"
+        )
 
     def retrieve(
         self,
         schema: dict,
         question: str,
         documents: list[SchemaDocument],
-    ) -> RetrievalResult:
+    ) -> dict:
+        """
+        Execute configured retrieval strategies and
+        combine their results.
+        """
 
-        embedding = self.embedding_service.create_embeddings(
-            [question]
-        )[0]
+        results: list[RetrievalResult] = []
 
-        matches = self.vector_store.search(
-            embedding,
-            settings.schema_retrieval_top_k,
-        )
+        for retriever in self.retrievers:
 
-        selected_schema = {}
+            result = retriever.retrieve(
+                schema=schema,
+                question=question,
+                documents=documents,
+            )
 
-        scores = {}
+            results.append(result)
 
-        for match in matches:
+        merged = self.fusion.fuse(results)
 
-            table = match.document.table_name
+        top_k = settings.schema_retrieval_top_k
 
-            if table not in schema:
-                continue
+        selected_tables = list(
+            merged.schema.keys()
+        )[:top_k]
 
-            selected_schema[table] = schema[table]
-
-            scores[table] = match.score
-
-        return RetrievalResult(
-            schema=selected_schema,
-            scores=scores,
-        )
+        return {
+            table_name: merged.schema[table_name]
+            for table_name in selected_tables
+        }
