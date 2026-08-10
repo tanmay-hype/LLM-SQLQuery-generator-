@@ -1,8 +1,6 @@
 import logging
 
-from app.core.config import settings
 from app.core.database import engine
-
 from app.exceptions import SQLValidationError
 
 from app.llm.prompt_builder import PromptBuilder
@@ -15,11 +13,13 @@ from app.llm.prompt_examples.retriever import ExampleRetriever
 from app.models.response import SQLResponse
 
 from app.schema.compression.schema_compressor import SchemaCompressor
-from app.schema.embeddings.gemini_embedding_service import GeminiEmbeddingService
-from app.schema.indexing.schema_index_service import SchemaIndexService
+from app.schema.embeddings.gemini_embedding_service import (
+    GeminiEmbeddingService,
+)
+from app.schema.indexing.schema_index_service import (
+    SchemaIndexService,
+)
 from app.schema.models.schema_document import SchemaDocument
-from app.schema.retrievers.keywords_retriever import KeywordRetriever
-from app.schema.retrievers.semantic_retriever import SemanticRetriever
 from app.schema.schema_document_builder import SchemaDocumentBuilder
 from app.schema.schema_formatter import SchemaFormatter
 from app.schema.schema_loader import SchemaLoader
@@ -41,50 +41,66 @@ class QueryService:
 
     def __init__(self, db_engine=engine):
 
-        # -----------------------------
-        # Schema
-        # -----------------------------
+        # --------------------------------------------------
+        # Database / Schema
+        # --------------------------------------------------
 
         self.schema_loader = SchemaLoader(db_engine)
-        self.schema_formatter = SchemaFormatter()
-        self.schema_document_builder = SchemaDocumentBuilder()
+
+        self.schema_document_builder = (
+            SchemaDocumentBuilder()
+        )
+
         self.schema_compressor = SchemaCompressor()
 
-        # -----------------------------
-        # Semantic Retrieval
-        # -----------------------------
+        self.schema_formatter = SchemaFormatter()
 
-        self.embedding_service = GeminiEmbeddingService()
+        # --------------------------------------------------
+        # Embeddings
+        # --------------------------------------------------
+
+        self.embedding_service = (
+            GeminiEmbeddingService()
+        )
+
+        # --------------------------------------------------
+        # Vector Store
+        # --------------------------------------------------
 
         self.vector_store = FAISSVectorStore()
+
+        # --------------------------------------------------
+        # Schema Index
+        # --------------------------------------------------
 
         self.schema_index_service = SchemaIndexService(
             embedding_service=self.embedding_service,
             vector_store=self.vector_store,
         )
 
-        keyword_retriever = KeywordRetriever()
-
-        semantic_retriever = SemanticRetriever(
-            index_service=self.schema_index_service,
-        )
+        # --------------------------------------------------
+        # Schema Retrieval
+        #
+        # IMPORTANT:
+        # The same embedding service and vector store are
+        # shared between SchemaIndexService and
+        # SchemaRetriever.
+        # --------------------------------------------------
 
         self.schema_retriever = SchemaRetriever(
-            retrievers=[
-                keyword_retriever,
-                semantic_retriever,
-            ]
+            embedding_service=self.embedding_service,
+            vector_store=self.vector_store,
         )
 
-        # -----------------------------
+        # --------------------------------------------------
         # Intent Detection
-        # -----------------------------
+        # --------------------------------------------------
 
         self.intent_detector = IntentDetector()
 
-        # -----------------------------
-        # Prompt Examples
-        # -----------------------------
+        # --------------------------------------------------
+        # Few-Shot Examples
+        # --------------------------------------------------
 
         self.example_repository = ExampleRepository()
 
@@ -92,9 +108,9 @@ class QueryService:
             self.example_repository
         )
 
-        # -----------------------------
+        # --------------------------------------------------
         # LLM
-        # -----------------------------
+        # --------------------------------------------------
 
         self.prompt_builder = PromptBuilder()
 
@@ -102,9 +118,9 @@ class QueryService:
 
         self.sql_corrector = SQLCorrector()
 
-        # -----------------------------
-        # SQL Pipeline
-        # -----------------------------
+        # --------------------------------------------------
+        # SQL Validation / Execution
+        # --------------------------------------------------
 
         self.sql_validator = SQLValidator()
 
@@ -116,59 +132,142 @@ class QueryService:
     ) -> SQLResponse:
         """
         Complete Natural Language → SQL pipeline.
+
+        Pipeline:
+
+        1. Load database schema
+        2. Build schema documents
+        3. Initialize/load semantic index
+        4. Detect intent
+        5. Retrieve relevant schema
+        6. Compress schema
+        7. Format schema
+        8. Retrieve few-shot examples
+        9. Build prompt
+        10. Generate SQL
+        11. Validate SQL
+        12. Correct SQL if necessary
+        13. Execute SQL
+        14. Return response
         """
 
-        logger.info("Loading database schema...")
+        # --------------------------------------------------
+        # 1. Load database schema
+        # --------------------------------------------------
+
+        logger.info(
+            "Loading database schema..."
+        )
 
         schema = self.schema_loader.load_schema()
 
-        logger.info("Building schema documents...")
+        # --------------------------------------------------
+        # 2. Build schema documents
+        # --------------------------------------------------
 
-        documents = self.schema_document_builder.build(
-            schema
+        logger.info(
+            "Building schema documents..."
         )
 
-        logger.info("Initializing semantic index...")
+        documents = (
+            self.schema_document_builder.build(
+                schema
+            )
+        )
+
+        # --------------------------------------------------
+        # 3. Initialize semantic index
+        # --------------------------------------------------
+
+        logger.info(
+            "Initializing schema vector index..."
+        )
 
         self.schema_index_service.initialize(
             documents
         )
 
-        logger.info("Detecting query intent...")
+        # --------------------------------------------------
+        # 4. Detect query intent
+        # --------------------------------------------------
 
-        intent_analysis = self.intent_detector.detect(
-            question
+        logger.info(
+            "Detecting query intent..."
         )
 
-        logger.info("Retrieving relevant schema...")
-
-        relevant_schema = self.schema_retriever.retrieve(
-            schema=schema,
-            question=question,
-            documents=documents,
+        intent_analysis = (
+            self.intent_detector.detect(
+                question
+            )
         )
 
-        logger.info("Compressing schema...")
+        # --------------------------------------------------
+        # 5. Retrieve relevant schema
+        # --------------------------------------------------
 
-        compressed_schema = self.schema_compressor.compress(
-            schema=relevant_schema,
-            question=question,
-            intent=intent_analysis,
+        logger.info(
+            "Retrieving relevant schema..."
         )
 
-        logger.info("Formatting schema...")
-
-        formatted_schema = self.schema_formatter.format(
-            compressed_schema
+        relevant_schema = (
+            self.schema_retriever.retrieve(
+                schema=schema,
+                question=question,
+                documents=documents,
+            )
         )
 
-        logger.info("Retrieving prompt examples...")
+        # --------------------------------------------------
+        # 6. Compress schema
+        # --------------------------------------------------
 
-        examples = self.example_retriever.retrieve(
-            analysis=intent_analysis,
+        logger.info(
+            "Compressing relevant schema..."
         )
 
-        logger.info("Building prompt...")
+        compressed_schema = (
+            self.schema_compressor.compress(
+                schema=relevant_schema,
+                question=question,
+                intent=intent_analysis,
+            )
+        )
+
+        # --------------------------------------------------
+        # 7. Format schema
+        # --------------------------------------------------
+
+        logger.info(
+            "Formatting schema for prompt..."
+        )
+
+        formatted_schema = (
+            self.schema_formatter.format(
+                compressed_schema
+            )
+        )
+
+        # --------------------------------------------------
+        # 8. Retrieve few-shot examples
+        # --------------------------------------------------
+
+        logger.info(
+            "Retrieving prompt examples..."
+        )
+
+        examples = (
+            self.example_retriever.retrieve(
+                analysis=intent_analysis,
+            )
+        )
+
+        # --------------------------------------------------
+        # 9. Build prompt
+        # --------------------------------------------------
+
+        logger.info(
+            "Building SQL generation prompt..."
+        )
 
         prompt = self.prompt_builder.build_prompt(
             schema=formatted_schema,
@@ -177,61 +276,110 @@ class QueryService:
             examples=examples,
         )
 
-        logger.info("Generating SQL...")
+        # --------------------------------------------------
+        # 10. Generate SQL
+        # --------------------------------------------------
+
+        logger.info(
+            "Generating SQL using LLM..."
+        )
 
         sql = self.sql_generator.generate_sql(
             prompt
         )
 
-        logger.info("Validating SQL...")
+        # --------------------------------------------------
+        # 11. Validate SQL
+        # --------------------------------------------------
+
+        logger.info(
+            "Validating generated SQL..."
+        )
 
         try:
 
-            validated_sql = self.sql_validator.validate(
-                sql,
-                schema,
+            validated_sql = (
+                self.sql_validator.validate(
+                    sql,
+                    schema,
+                )
             )
+
+        # --------------------------------------------------
+        # 12. Self-correction
+        # --------------------------------------------------
 
         except SQLValidationError as exc:
 
             logger.warning(
-                "Generated SQL failed validation. Attempting correction..."
+                "Generated SQL failed validation. "
+                "Attempting SQL correction..."
             )
 
-            corrected_sql = self.sql_corrector.correct(
-                question=question,
-                schema=formatted_schema,
-                invalid_sql=sql,
-                validation_error=str(exc),
+            corrected_sql = (
+                self.sql_corrector.correct(
+                    question=question,
+                    schema=formatted_schema,
+                    invalid_sql=sql,
+                    validation_error=str(exc),
+                )
             )
 
-            logger.info("Validating corrected SQL...")
-
-            validated_sql = self.sql_validator.validate(
-                corrected_sql,
-                schema,
+            logger.info(
+                "Validating corrected SQL..."
             )
 
-        logger.info("Executing SQL...")
+            validated_sql = (
+                self.sql_validator.validate(
+                    corrected_sql,
+                    schema,
+                )
+            )
+
+        # --------------------------------------------------
+        # 13. Execute SQL
+        # --------------------------------------------------
+
+        logger.info(
+            "Executing validated SQL..."
+        )
 
         results = self.sql_executor.execute(
             validated_sql
         )
 
-        logger.info("Query completed successfully.")
+        # --------------------------------------------------
+        # 14. Return response
+        # --------------------------------------------------
+
+        logger.info(
+            "Query completed successfully."
+        )
 
         return SQLResponse(
             sql=validated_sql,
             results=results,
         )
-        
-    def rebuild( self, documents: list[SchemaDocument]) -> None:
+
+    def rebuild_index(
+        self,
+        documents: list[SchemaDocument],
+    ) -> None:
         """
-        Rebuilds the semantic index from the provided documents.
+        Rebuild the semantic schema index.
+
+        Use this when the database schema changes.
         """
-        self.build(documents)
-        
-        self.vector_vector.save(
-            settings.faiss_index_path,
-            settings.schema_metadata_path,
+
+        logger.info(
+            "Rebuilding schema vector index..."
         )
+
+        self.schema_index_service.rebuild(
+            documents
+        )
+
+        logger.info(
+            "Schema vector index rebuilt successfully."
+        )
+
