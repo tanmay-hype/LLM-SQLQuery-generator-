@@ -3,6 +3,7 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 load_dotenv()
 
 
@@ -16,16 +17,21 @@ class Settings(BaseSettings):
     # ==================================================
 
     app_name: str = "LLM SQL Generator"
+
     debug: bool = False
 
     # ==================================================
     # Database
     # ==================================================
 
-    database_url: str = "sqlite:///./app.db"
+    database_url: str = (
+        "postgresql+psycopg://postgres:postgres@localhost:5432/llm_sql"
+    )
 
     postgres_user: str = "postgres"
+
     postgres_password: str = "postgres"
+
     postgres_db: str = "llm_sql"
 
     # ==================================================
@@ -33,45 +39,43 @@ class Settings(BaseSettings):
     # ==================================================
 
     openai_api_key: str = ""
-    openai_model: str = "gpt-4.1"
 
-    # Backward compatibility
-    model_name: str = "gpt-4.1"
+    openai_model: str = "gpt-4.1"
 
     # ==================================================
     # Gemini
     # ==================================================
 
     gemini_api_key: str = ""
+
     gemini_model: str = "gemini-2.5-pro"
 
-    gemini_embedding_model: str = "text-embedding-004"
+    gemini_embedding_model: str = "gemini-embedding-004"
 
     # ==================================================
     # Ollama
     # ==================================================
 
     ollama_base_url: str = "http://localhost:11434"
+
     ollama_model: str = "qwen2.5-coder:14b"
 
     # ==================================================
     # Schema Retrieval
     # ==================================================
 
-    schema_retriever_top_k: int = 5
-    schema_retriever_min_score: int = 5
+    schema_retrieval_strategy: str = "hybrid"
 
-    # Backward-compatible aliases
     schema_retrieval_top_k: int = 5
-    schema_retrieval_min_score: int = 5
 
-    schema_retrieval_strategy: str = "keyword"
+    schema_retrieval_min_score: int = 5
 
     # ==================================================
     # Example Retrieval
     # ==================================================
 
     example_retriever_top_k: int = 3
+
     example_retriever_min_score: int = 3
 
     # ==================================================
@@ -79,10 +83,10 @@ class Settings(BaseSettings):
     # ==================================================
 
     max_prompt_examples: int = 3
-    
-    # --------------------------------------------------
+
+    # ==================================================
     # Vector Index
-    # --------------------------------------------------
+    # ==================================================
 
     faiss_index_path: str = "./storage/schema.index"
 
@@ -94,24 +98,31 @@ class Settings(BaseSettings):
 
     sql_correction_max_attempts: int = 1
 
+    # ==================================================
+    # Pydantic Settings
+    # ==================================================
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
+        extra="ignore",
     )
 
 
 @lru_cache
 def get_settings() -> Settings:
+    """
+    Return cached application settings.
+    """
     return Settings()
 
 
 settings = get_settings()
 
 
-# -------------------------------------------------------------------
-# Backward-compatible aliases (optional)
-# These allow older modules to continue working while you refactor.
-# -------------------------------------------------------------------
+# ==================================================
+# Backward-compatible module-level aliases
+# ==================================================
 
 OPENAI_API_KEY = settings.openai_api_key
 OPENAI_MODEL = settings.openai_model
@@ -126,3 +137,4 @@ OLLAMA_MODEL = settings.ollama_model
 SCHEMA_RETRIEVAL_STRATEGY = settings.schema_retrieval_strategy
 
 SQL_CORRECTION_MAX_ATTEMPTS = settings.sql_correction_max_attempts
+
