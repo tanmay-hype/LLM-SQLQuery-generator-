@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     gemini_model: str = "gemini-2.5-pro"
 
-    gemini_embedding_model: str = "gemini-embedding-004"
+    gemini_embedding_model: str = "gemini-embedding-2"
 
     # ==================================================
     # Ollama

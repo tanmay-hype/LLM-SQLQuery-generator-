@@ -30,17 +30,12 @@ class GeminiEmbeddingService(EmbeddingService):
         if not texts:
             return []
 
-        embeddings = []
+        response = self.client.models.embed_content(
+            model=settings.gemini_embedding_model,
+            contents=texts,
+        )
 
-        for text in texts:
-
-            response = self.client.models.embed_content(
-                model=settings.gemini_embedding_model,
-                contents=text,
-            )
-
-            embeddings.append(
-                response.embeddings[0].values
-            )
-
-        return embeddings
+        return [
+            embedding.values
+            for embedding in response.embeddings
+        ]
