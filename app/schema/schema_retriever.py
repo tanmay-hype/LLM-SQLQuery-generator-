@@ -1,67 +1,29 @@
 from app.core.config import settings
 
+from app.schema.fusion.rrf import ReciprocalRankFusion
 from app.schema.models.retrieval_result import RetrievalResult
 from app.schema.models.schema_document import SchemaDocument
-from app.schema.models.retrieval_strategy import RetrievalStrategy
-
-from app.schema.retrievers.keywords_retriever import KeywordRetriever
-from app.schema.retrievers.semantic_retriever import SemanticRetriever
-
-from app.schema.fusion.rrf import ReciprocalRankFusion
+from app.schema.retrievers.base import BaseSchemaRetriever
 
 
 class SchemaRetriever:
     """
-    Coordinates keyword, semantic, and hybrid schema retrieval.
+    Coordinates the configured schema retrieval strategies.
+
+    Concrete retrievers are injected into this class.
     """
 
     def __init__(
         self,
-        embedding_service,
-        vector_store,
+        retrievers: list[BaseSchemaRetriever],
     ):
-        self.strategy = RetrievalStrategy(
-            settings.schema_retrieval_strategy
-        )
+        if not retrievers:
+            raise ValueError(
+                "At least one schema retriever is required."
+            )
 
+        self.retrievers = retrievers
         self.fusion = ReciprocalRankFusion()
-
-        self.embedding_service = embedding_service
-        self.vector_store = vector_store
-
-        self.retrievers = self._build_retrievers()
-
-    def _build_retrievers(self):
-        """
-        Build retrievers according to the configured strategy.
-        """
-
-        keyword_retriever = KeywordRetriever()
-
-        semantic_retriever = SemanticRetriever(
-            embedding_service=self.embedding_service,
-            vector_store=self.vector_store,
-        )
-
-        if self.strategy == RetrievalStrategy.KEYWORD:
-            return [
-                keyword_retriever,
-            ]
-
-        if self.strategy == RetrievalStrategy.SEMANTIC:
-            return [
-                semantic_retriever,
-            ]
-
-        if self.strategy == RetrievalStrategy.HYBRID:
-            return [
-                keyword_retriever,
-                semantic_retriever,
-            ]
-
-        raise ValueError(
-            f"Unknown retrieval strategy: {self.strategy}"
-        )
 
     def retrieve(
         self,
@@ -70,8 +32,8 @@ class SchemaRetriever:
         documents: list[SchemaDocument],
     ) -> dict:
         """
-        Execute the configured retrieval strategies
-        and combine their results.
+        Execute configured retrieval strategies
+        and combine their results using RRF.
         """
 
         results: list[RetrievalResult] = []
@@ -84,12 +46,21 @@ class SchemaRetriever:
                 documents=documents,
             )
 
-            results.append(result)
+            if result.schema:
+                results.append(result)
 
         if not results:
             return {}
 
+        # --------------------------------------------------
+        # Fuse retrieval results
+        # --------------------------------------------------
+
         merged = self.fusion.fuse(results)
+
+        # --------------------------------------------------
+        # Limit final schema
+        # --------------------------------------------------
 
         top_k = settings.schema_retrieval_top_k
 
@@ -101,4 +72,3 @@ class SchemaRetriever:
             table_name: merged.schema[table_name]
             for table_name in selected_tables
         }
-

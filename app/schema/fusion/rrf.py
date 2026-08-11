@@ -8,12 +8,27 @@ class ReciprocalRankFusion:
     """
 
     def __init__(self, k: int = 60):
+        if k <= 0:
+            raise ValueError("RRF k must be greater than zero.")
+
         self.k = k
 
     def fuse(
         self,
         results: list[RetrievalResult],
     ) -> RetrievalResult:
+        """
+        Combine ranked retrieval results using RRF.
+
+        Each retrieval strategy contributes:
+
+            1 / (k + rank)
+
+        to the final score of a table.
+
+        Tables appearing in multiple retrieval strategies
+        therefore receive a higher fused score.
+        """
 
         if not results:
             raise ValueError(
@@ -30,22 +45,20 @@ class ReciprocalRankFusion:
 
             ranked_tables = sorted(
                 result.scores.items(),
-                key=lambda item: item[1],
-                reverse=True,
+                key=lambda item: (-item[1], item[0]),
             )
 
             for rank, (table_name, _) in enumerate(
                 ranked_tables,
                 start=1,
             ):
-
-                rrf_score = 1.0 / (
+                contribution = 1.0 / (
                     self.k + rank
                 )
 
                 fused_scores[table_name] = (
                     fused_scores.get(table_name, 0.0)
-                    + rrf_score
+                    + contribution
                 )
 
                 if table_name in result.schema:
@@ -55,8 +68,7 @@ class ReciprocalRankFusion:
 
         ranked_tables = sorted(
             fused_scores.items(),
-            key=lambda item: item[1],
-            reverse=True,
+            key=lambda item: (-item[1], item[0]),
         )
 
         merged_schema = {
@@ -69,3 +81,4 @@ class ReciprocalRankFusion:
             schema=merged_schema,
             scores=fused_scores,
         )
+

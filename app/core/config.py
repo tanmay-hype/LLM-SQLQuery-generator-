@@ -64,7 +64,7 @@ class Settings(BaseSettings):
 
     schema_retrieval_strategy: str = "hybrid"
 
-    schema_retrieval_top_k: int = 5
+    schema_retrieval_top_k: int = 3
 
     schema_retrieval_min_score: int = 5
 

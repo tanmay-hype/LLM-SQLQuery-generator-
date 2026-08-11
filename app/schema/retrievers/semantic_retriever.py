@@ -9,7 +9,7 @@ from app.schema.vector_store.base import BaseVectorStore
 
 class SemanticRetriever(BaseSchemaRetriever):
     """
-    Retrieves relevant schema using semantic similarity.
+    Retrieves relevant schema documents using semantic similarity.
     """
 
     def __init__(
@@ -36,21 +36,39 @@ class SemanticRetriever(BaseSchemaRetriever):
                 scores={},
             )
 
-        # Create an embedding for the user's question.
-        query_embedding = (
+        # --------------------------------------------------
+        # Generate query embedding
+        # --------------------------------------------------
+
+        query_embeddings = (
             self.embedding_service.create_embeddings(
                 [question]
-            )[0]
+            )
         )
 
-        # Search the FAISS vector store.
+        if not query_embeddings:
+            return RetrievalResult(
+                schema={},
+                scores={},
+            )
+
+        query_embedding = query_embeddings[0]
+
+        # --------------------------------------------------
+        # Search FAISS
+        # --------------------------------------------------
+
         matches = self.vector_store.search(
             embedding=query_embedding,
             top_k=settings.schema_retrieval_top_k,
         )
 
-        selected_schema = {}
-        scores = {}
+        # --------------------------------------------------
+        # Convert matches into RetrievalResult
+        # --------------------------------------------------
+
+        selected_schema: dict = {}
+        scores: dict[str, float] = {}
 
         for match in matches:
 
@@ -65,10 +83,11 @@ class SemanticRetriever(BaseSchemaRetriever):
                 table_name
             ]
 
-            scores[table_name] = match.score
+            scores[table_name] = float(
+                match.score
+            )
 
         return RetrievalResult(
             schema=selected_schema,
             scores=scores,
         )
-

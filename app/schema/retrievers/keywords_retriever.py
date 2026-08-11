@@ -35,18 +35,24 @@ class KeywordRetriever(BaseSchemaRetriever):
         top_k: int | None = None,
     ) -> RetrievalResult:
         """
-        Retrieve the most relevant tables from the schema.
+        Retrieve relevant tables using keyword matching.
 
-        The retrieval process is:
+        Process:
 
         1. Tokenize the question.
         2. Score tables and columns.
         3. Select the highest-scoring tables.
-        4. Expand selection using foreign-key relationships.
-        5. Return the resulting schema with retrieval scores.
+        4. Expand only one level through foreign-key relationships.
+        5. Return the selected schema and scores.
         """
 
         if not schema:
+            return RetrievalResult(
+                schema={},
+                scores={},
+            )
+
+        if not question or not question.strip():
             return RetrievalResult(
                 schema={},
                 scores={},
@@ -62,30 +68,29 @@ class KeywordRetriever(BaseSchemaRetriever):
             tokens=tokens,
         )
 
-        selected_schema = self._select_tables(
+        selected_tables = self._select_tables(
             schema=schema,
             scores=scores,
             top_k=top_k,
         )
 
         # --------------------------------------------------
-        # Expand through foreign-key relationships
+        # Foreign-key expansion
         # --------------------------------------------------
 
-        selected_tables = self._expand_related_tables(
+        expanded_tables = self._expand_related_tables(
             schema=schema,
-            selected_tables=set(selected_schema.keys()),
+            selected_tables=set(selected_tables),
         )
 
         final_schema = {
             table_name: schema[table_name]
-            for table_name in selected_tables
+            for table_name in expanded_tables
             if table_name in schema
         }
 
-        # Keep the selected table scores.
-        # Tables added through FK expansion receive a score
-        # of zero because they were not directly matched.
+        # Directly matched tables retain their score.
+        # FK-expanded tables receive a score of zero.
         final_scores = {
             table_name: scores.get(table_name, 0)
             for table_name in final_schema
@@ -101,11 +106,18 @@ class KeywordRetriever(BaseSchemaRetriever):
     # --------------------------------------------------
 
     @staticmethod
-    def _tokenize(
-        question: str,
-    ) -> list[str]:
+    def _tokenize(question: str) -> list[str]:
         """
         Convert the question into normalized tokens.
+
+        Example:
+
+            "Show customer names and email addresses"
+
+        becomes approximately:
+
+            ["show", "customer", "names", "and",
+             "email", "addresses"]
         """
 
         return re.findall(
@@ -158,15 +170,16 @@ class KeywordRetriever(BaseSchemaRetriever):
         schema: dict,
         scores: dict[str, int],
         top_k: int,
-    ) -> dict:
+    ) -> set[str]:
         """
         Select the highest-scoring tables.
 
-        Tables below the configured minimum score are ignored.
+        Only tables meeting the minimum relevance score
+        are selected.
 
-        If no tables pass the minimum score, fall back to the
-        first top_k tables so the pipeline still has schema
-        information available.
+        If no table reaches the minimum score, return an
+        empty set and allow semantic retrieval to contribute
+        in hybrid mode.
         """
 
         min_score = settings.schema_retrieval_min_score
@@ -177,21 +190,8 @@ class KeywordRetriever(BaseSchemaRetriever):
             if score >= min_score
         }
 
-        # --------------------------------------------------
-        # Fallback
-        # --------------------------------------------------
-
         if not filtered_scores:
-            fallback_tables = list(schema.keys())[:top_k]
-
-            return {
-                table_name: schema[table_name]
-                for table_name in fallback_tables
-            }
-
-        # --------------------------------------------------
-        # Rank tables
-        # --------------------------------------------------
+            return set()
 
         ranked_tables = sorted(
             filtered_scores.items(),
@@ -199,12 +199,10 @@ class KeywordRetriever(BaseSchemaRetriever):
             reverse=True,
         )
 
-        selected = {}
-
-        for table_name, _ in ranked_tables[:top_k]:
-            selected[table_name] = schema[table_name]
-
-        return selected
+        return {
+            table_name
+            for table_name, _ in ranked_tables[:top_k]
+        }
 
     # --------------------------------------------------
     # Table Scoring
@@ -223,9 +221,17 @@ class KeywordRetriever(BaseSchemaRetriever):
 
         normalized_table_name = table_name.lower()
 
+        # Treat underscores as word separators.
+        table_tokens = set(
+            re.findall(
+                r"\w+",
+                normalized_table_name.replace("_", " "),
+            )
+        )
+
         for token in tokens:
 
-            if token == normalized_table_name:
+            if token in table_tokens:
                 score += self.TABLE_EXACT_MATCH
 
             elif token in normalized_table_name:
@@ -257,9 +263,16 @@ class KeywordRetriever(BaseSchemaRetriever):
 
             normalized_column_name = column_name.lower()
 
+            column_tokens = set(
+                re.findall(
+                    r"\w+",
+                    normalized_column_name.replace("_", " "),
+                )
+            )
+
             for token in tokens:
 
-                if token == normalized_column_name:
+                if token in column_tokens:
                     score += self.COLUMN_EXACT_MATCH
 
                 elif token in normalized_column_name:
@@ -277,18 +290,54 @@ class KeywordRetriever(BaseSchemaRetriever):
         selected_tables: set[str],
     ) -> set[str]:
         """
-        Expand the selected tables using foreign-key relationships.
+        Expand selected tables by one level through
+        foreign-key relationships.
 
-        If:
+        Example:
 
             orders -> customers
 
-        and either `orders` or `customers` is selected,
-        the related table is also included.
+        If "orders" is selected, "customers" is added.
+
+        If "customers" is selected and orders references
+        customers, "orders" is added.
+
+        Only one FK level is expanded.
         """
+
+        if not selected_tables:
+            return set()
 
         expanded = set(selected_tables)
 
+        for table_name in selected_tables:
+
+            table_info = schema.get(
+                table_name,
+                {},
+            )
+
+            foreign_keys = table_info.get(
+                "foreign_keys",
+                [],
+            )
+
+            for foreign_key in foreign_keys:
+
+                referred_table = foreign_key.get(
+                    "referred_table"
+                )
+
+                if (
+                    referred_table
+                    and referred_table in schema
+                ):
+                    expanded.add(
+                        referred_table
+                    )
+
+        # Also find tables that reference the selected
+        # tables.
         for table_name, table_info in schema.items():
 
             foreign_keys = table_info.get(
@@ -302,22 +351,7 @@ class KeywordRetriever(BaseSchemaRetriever):
                     "referred_table"
                 )
 
-                if not referred_table:
-                    continue
-
-                # Current table references a selected table.
-                if (
-                    table_name in selected_tables
-                    and referred_table in schema
-                ):
-                    expanded.add(referred_table)
-
-                # Current table is referenced by a selected table.
-                if (
-                    referred_table in selected_tables
-                    and table_name in schema
-                ):
+                if referred_table in selected_tables:
                     expanded.add(table_name)
 
         return expanded
-
