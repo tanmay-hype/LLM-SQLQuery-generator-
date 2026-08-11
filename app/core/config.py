@@ -24,9 +24,7 @@ class Settings(BaseSettings):
     # Database
     # ==================================================
 
-    database_url: str = (
-        "postgresql+psycopg://postgres:postgres@localhost:5432/llm_sql"
-    )
+    database_url: str = ""
 
     postgres_user: str = "postgres"
 
