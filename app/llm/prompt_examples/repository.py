@@ -4,7 +4,11 @@ from app.models.prompt_example import PromptExample
 
 class ExampleRepository:
     """
-    Repository that stores and provides all few-shot prompt examples.
+    Repository that stores and provides few-shot prompt examples.
+
+    The examples demonstrate SQL patterns rather than depending on a
+    specific database schema. The actual database schema is supplied
+    separately to the LLM by the prompt pipeline.
     """
 
     def __init__(self) -> None:
@@ -19,260 +23,330 @@ class ExampleRepository:
         """
         return list(self.examples)
 
+
 EXAMPLES = [
+
+    # --------------------------------------------------
+    # LOOKUP
+    # --------------------------------------------------
+
+    PromptExample(
+        intents={QueryIntent.LOOKUP},
+        question="Show all records",
+        sql="""
+SELECT
+    *
+FROM some_table;
+""",
+    ),
+
+    PromptExample(
+        intents={QueryIntent.LOOKUP},
+        question="Show names and email addresses",
+        sql="""
+SELECT
+    name,
+    email
+FROM some_table;
+""",
+    ),
+
+    # --------------------------------------------------
+    # FILTER
+    # --------------------------------------------------
+
     PromptExample(
         intents={QueryIntent.LOOKUP, QueryIntent.FILTER},
-        question="List active customers from California",
+        question="Show records where status is active",
         sql="""
 SELECT
-    customer_id,
-    full_name,
-    email
-FROM customers
-WHERE state = 'CA'
-  AND is_active = TRUE;
+    *
+FROM some_table
+WHERE status = 'active';
 """,
     ),
+
     PromptExample(
-        intents={QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
-        question="Total sales by category",
+        intents={QueryIntent.LOOKUP, QueryIntent.FILTER},
+        question="Show records created after a specific date",
         sql="""
 SELECT
-    category,
-    SUM(amount) AS total_sales
-FROM sales
-GROUP BY category
-ORDER BY total_sales DESC;
+    *
+FROM some_table
+WHERE created_at >= DATE '2025-01-01';
 """,
     ),
+
+    # --------------------------------------------------
+    # SORT
+    # --------------------------------------------------
+
     PromptExample(
-        intents={QueryIntent.SORT, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
-        question="Top 5 customers by total purchase amount",
+        intents={QueryIntent.LOOKUP, QueryIntent.SORT},
+        question="Show the 10 most recent records",
         sql="""
 SELECT
-    customer_id,
-    SUM(total_amount) AS total_purchases
-FROM orders
-GROUP BY customer_id
-ORDER BY total_purchases DESC
-LIMIT 5;
-""",
-    ),
-    PromptExample(
-        intents={QueryIntent.JOIN, QueryIntent.LOOKUP},
-        question="Show order id, customer name, and order date",
-        sql="""
-SELECT
-    o.order_id,
-    c.full_name AS customer_name,
-    o.order_date
-FROM orders AS o
-JOIN customers AS c
-  ON c.customer_id = o.customer_id;
-""",
-    ),
-    PromptExample(
-        intents={QueryIntent.TIME_SERIES, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
-        question="Monthly revenue for the last 12 months",
-        sql="""
-SELECT
-    DATE_TRUNC('month', order_date) AS month,
-    SUM(total_amount) AS revenue
-FROM orders
-WHERE order_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-GROUP BY month
-ORDER BY month;
-""",
-    ),
-    PromptExample(
-        intents={QueryIntent.COMPARISON, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
-        question="Compare paid and unpaid invoice counts",
-        sql="""
-SELECT
-    payment_status,
-    COUNT(*) AS invoice_count
-FROM invoices
-GROUP BY payment_status
-ORDER BY invoice_count DESC;
-""",
-    ),
-    PromptExample(
-        intents={QueryIntent.FILTER, QueryIntent.AGGREGATION},
-        question="How many orders were placed this week",
-        sql="""
-SELECT
-    COUNT(*) AS orders_this_week
-FROM orders
-WHERE order_date >= DATE_TRUNC('week', CURRENT_DATE)
-  AND order_date < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week';
-""",
-    ),
-    PromptExample(
-        intents={QueryIntent.JOIN, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
-        question="Average order value by customer segment",
-        sql="""
-SELECT
-    c.segment,
-    AVG(o.total_amount) AS avg_order_value
-FROM orders AS o
-JOIN customers AS c
-  ON c.customer_id = o.customer_id
-GROUP BY c.segment
-ORDER BY avg_order_value DESC;
-""",
-    ),
-    PromptExample(
-        intents={QueryIntent.SORT, QueryIntent.LOOKUP},
-        question="Show the 10 most recently created products",
-        sql="""
-SELECT
-    product_id,
-    product_name,
-    created_at
-FROM products
+    *
+FROM some_table
 ORDER BY created_at DESC
 LIMIT 10;
 """,
     ),
+
     PromptExample(
-        intents={QueryIntent.TIME_SERIES, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
-        question="Daily active users in the last 30 days",
+        intents={QueryIntent.LOOKUP, QueryIntent.SORT},
+        question="Show the 5 records with the highest value",
         sql="""
 SELECT
-    DATE_TRUNC('day', last_login_at) AS day,
-    COUNT(DISTINCT user_id) AS active_users
-FROM user_sessions
-WHERE last_login_at >= CURRENT_DATE - INTERVAL '29 days'
+    *
+FROM some_table
+ORDER BY value DESC
+LIMIT 5;
+""",
+    ),
+
+    # --------------------------------------------------
+    # AGGREGATION
+    # --------------------------------------------------
+
+    PromptExample(
+        intents={QueryIntent.AGGREGATION},
+        question="Show the total value",
+        sql="""
+SELECT
+    SUM(value) AS total_value
+FROM some_table;
+""",
+    ),
+
+    PromptExample(
+        intents={QueryIntent.AGGREGATION},
+        question="Count all records",
+        sql="""
+SELECT
+    COUNT(*) AS record_count
+FROM some_table;
+""",
+    ),
+
+    PromptExample(
+        intents={QueryIntent.AGGREGATION},
+        question="Show the average value",
+        sql="""
+SELECT
+    AVG(value) AS average_value
+FROM some_table;
+""",
+    ),
+
+    # --------------------------------------------------
+    # GROUP BY
+    # --------------------------------------------------
+
+    PromptExample(
+        intents={QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Show total value by category",
+        sql="""
+SELECT
+    category,
+    SUM(value) AS total_value
+FROM some_table
+GROUP BY category
+ORDER BY total_value DESC;
+""",
+    ),
+
+    PromptExample(
+        intents={QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
+        question="Count records by status",
+        sql="""
+SELECT
+    status,
+    COUNT(*) AS record_count
+FROM some_table
+GROUP BY status
+ORDER BY record_count DESC;
+""",
+    ),
+
+    # --------------------------------------------------
+    # JOIN
+    # --------------------------------------------------
+
+    PromptExample(
+        intents={QueryIntent.JOIN, QueryIntent.LOOKUP},
+        question="Show information from two related tables",
+        sql="""
+SELECT
+    a.id,
+    b.name
+FROM first_table AS a
+JOIN second_table AS b
+    ON b.id = a.second_table_id;
+""",
+    ),
+
+    PromptExample(
+        intents={
+            QueryIntent.JOIN,
+            QueryIntent.AGGREGATION,
+            QueryIntent.GROUP_BY,
+        },
+        question="Show total value for each related entity",
+        sql="""
+SELECT
+    b.name,
+    SUM(a.value) AS total_value
+FROM first_table AS a
+JOIN second_table AS b
+    ON b.id = a.second_table_id
+GROUP BY b.id, b.name
+ORDER BY total_value DESC;
+""",
+    ),
+
+    # --------------------------------------------------
+    # TIME SERIES
+    # --------------------------------------------------
+
+    PromptExample(
+        intents={
+            QueryIntent.TIME_SERIES,
+            QueryIntent.AGGREGATION,
+            QueryIntent.GROUP_BY,
+        },
+        question="Show monthly record counts",
+        sql="""
+SELECT
+    DATE_TRUNC('month', created_at) AS month,
+    COUNT(*) AS record_count
+FROM some_table
+GROUP BY month
+ORDER BY month;
+""",
+    ),
+
+    PromptExample(
+        intents={
+            QueryIntent.TIME_SERIES,
+            QueryIntent.AGGREGATION,
+            QueryIntent.GROUP_BY,
+        },
+        question="Show monthly total value",
+        sql="""
+SELECT
+    DATE_TRUNC('month', created_at) AS month,
+    SUM(value) AS total_value
+FROM some_table
+GROUP BY month
+ORDER BY month;
+""",
+    ),
+
+    PromptExample(
+        intents={
+            QueryIntent.TIME_SERIES,
+            QueryIntent.AGGREGATION,
+            QueryIntent.GROUP_BY,
+        },
+        question="Show daily record counts",
+        sql="""
+SELECT
+    DATE_TRUNC('day', created_at) AS day,
+    COUNT(*) AS record_count
+FROM some_table
 GROUP BY day
 ORDER BY day;
 """,
     ),
+
+    # --------------------------------------------------
+    # COMPARISON
+    # --------------------------------------------------
+
     PromptExample(
-        intents={QueryIntent.JOIN, QueryIntent.COMPARISON, QueryIntent.AGGREGATION},
-        question="Which products have never been ordered",
-        sql="""
-SELECT
-    p.product_id,
-    p.product_name
-FROM products AS p
-LEFT JOIN order_items AS oi
-  ON oi.product_id = p.product_id
-WHERE oi.product_id IS NULL;
-""",
-    ),
-    PromptExample(
-        intents={QueryIntent.AGGREGATION, QueryIntent.GROUP_BY, QueryIntent.FILTER},
-        question="Count orders per status for the current month",
+        intents={
+            QueryIntent.COMPARISON,
+            QueryIntent.AGGREGATION,
+            QueryIntent.GROUP_BY,
+        },
+        question="Compare counts by status",
         sql="""
 SELECT
     status,
-    COUNT(*) AS order_count
-FROM orders
-WHERE order_date >= DATE_TRUNC('month', CURRENT_DATE)
-  AND order_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+    COUNT(*) AS record_count
+FROM some_table
 GROUP BY status
-ORDER BY order_count DESC;
+ORDER BY record_count DESC;
 """,
     ),
+
     PromptExample(
-        intents={QueryIntent.SORT, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
-        question="Top 3 sales reps by revenue this quarter",
+        intents={
+            QueryIntent.COMPARISON,
+            QueryIntent.TIME_SERIES,
+            QueryIntent.AGGREGATION,
+        },
+        question="Show month-over-month value changes",
         sql="""
-SELECT
-    o.sales_rep_id,
-    SUM(o.total_amount) AS quarter_revenue
-FROM orders AS o
-WHERE o.order_date >= DATE_TRUNC('quarter', CURRENT_DATE)
-  AND o.order_date < DATE_TRUNC('quarter', CURRENT_DATE) + INTERVAL '3 months'
-GROUP BY o.sales_rep_id
-ORDER BY quarter_revenue DESC
-LIMIT 3;
-""",
-    ),
-    PromptExample(
-        intents={QueryIntent.COMPARISON, QueryIntent.TIME_SERIES, QueryIntent.AGGREGATION},
-        question="Month-over-month revenue change",
-        sql="""
-WITH monthly_revenue AS (
+WITH monthly_values AS (
     SELECT
-        DATE_TRUNC('month', order_date) AS month,
-        SUM(total_amount) AS revenue
-    FROM orders
+        DATE_TRUNC('month', created_at) AS month,
+        SUM(value) AS total_value
+    FROM some_table
     GROUP BY month
 )
 SELECT
     month,
-    revenue,
-    revenue - LAG(revenue) OVER (ORDER BY month) AS revenue_change
-FROM monthly_revenue
+    total_value,
+    total_value
+        - LAG(total_value) OVER (ORDER BY month)
+        AS value_change
+FROM monthly_values
 ORDER BY month;
 """,
     ),
+
+    # --------------------------------------------------
+    # FILTER + AGGREGATION
+    # --------------------------------------------------
+
     PromptExample(
-        intents={QueryIntent.GROUP_BY, QueryIntent.AGGREGATION},
-        question="Average delivery time by shipping method",
+        intents={
+            QueryIntent.FILTER,
+            QueryIntent.AGGREGATION,
+        },
+        question="Count records created this month",
         sql="""
 SELECT
-    shipping_method,
-    AVG(EXTRACT(EPOCH FROM (delivered_at - shipped_at)) / 3600.0) AS avg_delivery_hours
-FROM shipments
-WHERE delivered_at IS NOT NULL
-GROUP BY shipping_method
-ORDER BY avg_delivery_hours;
+    COUNT(*) AS record_count
+FROM some_table
+WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+  AND created_at < DATE_TRUNC('month', CURRENT_DATE)
+      + INTERVAL '1 month';
 """,
     ),
+
+    # --------------------------------------------------
+    # SORT + AGGREGATION + GROUP BY
+    # --------------------------------------------------
+
     PromptExample(
-        intents={QueryIntent.JOIN, QueryIntent.AGGREGATION, QueryIntent.GROUP_BY},
-        question="Revenue by product category in 2025",
+        intents={
+            QueryIntent.SORT,
+            QueryIntent.AGGREGATION,
+            QueryIntent.GROUP_BY,
+        },
+        question="Show the top 5 categories by total value",
         sql="""
 SELECT
-    p.category,
-    SUM(oi.quantity * oi.unit_price) AS category_revenue
-FROM order_items AS oi
-JOIN orders AS o
-  ON o.order_id = oi.order_id
-JOIN products AS p
-  ON p.product_id = oi.product_id
-WHERE o.order_date >= DATE '2025-01-01'
-  AND o.order_date < DATE '2026-01-01'
-GROUP BY p.category
-ORDER BY category_revenue DESC;
+    category,
+    SUM(value) AS total_value
+FROM some_table
+GROUP BY category
+ORDER BY total_value DESC
+LIMIT 5;
 """,
     ),
-    PromptExample(
-        intents={QueryIntent.FILTER, QueryIntent.LOOKUP, QueryIntent.SORT},
-        question="Show high-priority open support tickets",
-        sql="""
-SELECT
-    ticket_id,
-    subject,
-    created_at
-FROM support_tickets
-WHERE priority = 'high'
-  AND status <> 'closed'
-ORDER BY created_at ASC;
-""",
-    ),
-    PromptExample(
-        intents={QueryIntent.TIME_SERIES, QueryIntent.COMPARISON, QueryIntent.AGGREGATION},
-        question="Weekly signups this year versus last year",
-        sql="""
-WITH weekly_signups AS (
-    SELECT
-        DATE_TRUNC('week', created_at) AS week_start,
-        EXTRACT(YEAR FROM created_at)::int AS signup_year,
-        COUNT(*) AS signup_count
-    FROM users
-    WHERE created_at >= DATE_TRUNC('year', CURRENT_DATE) - INTERVAL '1 year'
-    GROUP BY week_start, signup_year
-)
-SELECT
-    week_start,
-    COALESCE(SUM(signup_count) FILTER (WHERE signup_year = EXTRACT(YEAR FROM CURRENT_DATE)::int), 0) AS signups_this_year,
-    COALESCE(SUM(signup_count) FILTER (WHERE signup_year = EXTRACT(YEAR FROM CURRENT_DATE)::int - 1), 0) AS signups_last_year
-FROM weekly_signups
-GROUP BY week_start
-ORDER BY week_start;
-""",
-    ),
+
 ]
