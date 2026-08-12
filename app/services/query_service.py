@@ -37,9 +37,49 @@ logger = logging.getLogger(__name__)
 class QueryService:
     """
     Coordinates the complete Natural Language → SQL workflow.
+
+    Pipeline:
+
+        Natural Language Question
+                ↓
+        Schema Loading
+                ↓
+        Schema Documents
+                ↓
+        Semantic Index
+                ↓
+        Intent Detection
+                ↓
+        Hybrid Schema Retrieval
+                ↓
+        Schema Compression
+                ↓
+        Schema Formatting
+                ↓
+        Few-Shot Example Retrieval
+                ↓
+        Prompt Construction
+                ↓
+        SQL Generation
+                ↓
+        SQL Validation
+                ↓
+        SQL Correction (if required)
+                ↓
+        SQL Execution
+                ↓
+        SQLResponse
     """
 
     def __init__(self, db_engine=engine):
+        """
+        Initialize all dependencies required by the SQL pipeline.
+
+        Parameters
+        ----------
+        db_engine:
+            SQLAlchemy database engine.
+        """
 
         # --------------------------------------------------
         # Database / Schema
@@ -56,7 +96,7 @@ class QueryService:
         self.schema_formatter = SchemaFormatter()
 
         # --------------------------------------------------
-        # Embeddings
+        # Embedding Service
         # --------------------------------------------------
 
         self.embedding_service = (
@@ -80,11 +120,6 @@ class QueryService:
 
         # --------------------------------------------------
         # Schema Retrieval
-        #
-        # IMPORTANT:
-        # The same embedding service and vector store are
-        # shared between SchemaIndexService and
-        # SchemaRetriever.
         # --------------------------------------------------
 
         self.schema_retriever = SchemaRetriever(
@@ -126,44 +161,223 @@ class QueryService:
 
         self.sql_executor = SQLExecutor()
 
+    # ======================================================
+    # PUBLIC API
+    # ======================================================
+
     def generate_sql(
         self,
         question: str,
     ) -> SQLResponse:
         """
-        Complete Natural Language → SQL pipeline.
+        Execute the complete Natural Language → SQL pipeline.
 
-        Pipeline:
+        Parameters
+        ----------
+        question:
+            Natural language database question.
 
-        1. Load database schema
-        2. Build schema documents
-        3. Initialize/load semantic index
-        4. Detect intent
-        5. Retrieve relevant schema
-        6. Compress schema
-        7. Format schema
-        8. Retrieve few-shot examples
-        9. Build prompt
-        10. Generate SQL
-        11. Validate SQL
-        12. Correct SQL if necessary
-        13. Execute SQL
-        14. Return response
+        Returns
+        -------
+        SQLResponse
+            Validated SQL and query execution results.
         """
+
+        self._validate_question(question)
+
+        logger.info(
+            "Starting SQL generation pipeline."
+        )
 
         # --------------------------------------------------
         # 1. Load database schema
         # --------------------------------------------------
 
-        logger.info(
-            "Loading database schema..."
-        )
-
-        schema = self.schema_loader.load_schema()
+        schema = self._load_schema()
 
         # --------------------------------------------------
         # 2. Build schema documents
         # --------------------------------------------------
+
+        documents = self._build_schema_documents(
+            schema
+        )
+
+        # --------------------------------------------------
+        # 3. Initialize semantic schema index
+        # --------------------------------------------------
+
+        self._initialize_schema_index(
+            documents
+        )
+
+        # --------------------------------------------------
+        # 4. Detect intent
+        # --------------------------------------------------
+
+        intent_analysis = self._detect_intent(
+            question
+        )
+
+        logger.info(
+            "Detected primary intent: %s",
+            intent_analysis.primary,
+        )
+
+        # --------------------------------------------------
+        # 5. Retrieve relevant schema
+        # --------------------------------------------------
+
+        relevant_schema = (
+            self._retrieve_schema(
+                schema=schema,
+                question=question,
+                documents=documents,
+            )
+        )
+
+        logger.info(
+            "Relevant schema tables: %s",
+            list(relevant_schema.keys()),
+        )
+
+        # --------------------------------------------------
+        # 6. Compress schema
+        # --------------------------------------------------
+
+        compressed_schema = (
+            self._compress_schema(
+                schema=relevant_schema,
+                question=question,
+                intent=intent_analysis,
+            )
+        )
+
+        # --------------------------------------------------
+        # 7. Format schema
+        # --------------------------------------------------
+
+        formatted_schema = (
+            self._format_schema(
+                compressed_schema
+            )
+        )
+
+        # --------------------------------------------------
+        # 8. Retrieve few-shot examples
+        # --------------------------------------------------
+
+        examples = (
+            self._retrieve_examples(
+                intent_analysis
+            )
+        )
+
+        logger.info(
+            "Retrieved %d prompt examples.",
+            len(examples),
+        )
+
+        # --------------------------------------------------
+        # 9. Build prompt
+        # --------------------------------------------------
+
+        prompt = self._build_prompt(
+            schema=formatted_schema,
+            question=question,
+            intent=intent_analysis,
+            examples=examples,
+        )
+
+        # --------------------------------------------------
+        # 10-12. Generate, validate and correct SQL
+        # --------------------------------------------------
+
+        validated_sql = (
+            self._generate_and_validate_sql(
+                prompt=prompt,
+                question=question,
+                formatted_schema=formatted_schema,
+                full_schema=schema,
+            )
+        )
+
+        # --------------------------------------------------
+        # 13. Execute SQL
+        # --------------------------------------------------
+
+        results = self._execute_sql(
+            validated_sql
+        )
+
+        # --------------------------------------------------
+        # 14. Return response
+        # --------------------------------------------------
+
+        logger.info(
+            "SQL generation pipeline completed successfully."
+        )
+
+        return SQLResponse(
+            sql=validated_sql,
+            results=results,
+        )
+
+    # ======================================================
+    # PIPELINE STAGES
+    # ======================================================
+
+    @staticmethod
+    def _validate_question(
+        question: str,
+    ) -> None:
+        """
+        Validate the user's question before starting
+        the expensive retrieval / embedding / LLM pipeline.
+        """
+
+        if not question or not question.strip():
+            raise ValueError(
+                "Question cannot be empty."
+            )
+
+    # ------------------------------------------------------
+
+    def _load_schema(self) -> dict:
+        """
+        Load the current database schema.
+        """
+
+        logger.info(
+            "Loading database schema..."
+        )
+
+        schema = (
+            self.schema_loader.load_schema()
+        )
+
+        if not schema:
+            raise RuntimeError(
+                "Database schema is empty."
+            )
+
+        logger.info(
+            "Loaded %d database tables.",
+            len(schema),
+        )
+
+        return schema
+
+    # ------------------------------------------------------
+
+    def _build_schema_documents(
+        self,
+        schema: dict,
+    ) -> list[SchemaDocument]:
+        """
+        Convert the raw database schema into
+        searchable schema documents.
+        """
 
         logger.info(
             "Building schema documents..."
@@ -175,9 +389,27 @@ class QueryService:
             )
         )
 
-        # --------------------------------------------------
-        # 3. Initialize semantic index
-        # --------------------------------------------------
+        if not documents:
+            raise RuntimeError(
+                "No schema documents were created."
+            )
+
+        logger.info(
+            "Created %d schema documents.",
+            len(documents),
+        )
+
+        return documents
+
+    # ------------------------------------------------------
+
+    def _initialize_schema_index(
+        self,
+        documents: list[SchemaDocument],
+    ) -> None:
+        """
+        Initialize or load the semantic schema index.
+        """
 
         logger.info(
             "Initializing schema vector index..."
@@ -187,23 +419,40 @@ class QueryService:
             documents
         )
 
-        # --------------------------------------------------
-        # 4. Detect query intent
-        # --------------------------------------------------
+        logger.info(
+            "Schema vector index initialized."
+        )
+
+    # ------------------------------------------------------
+
+    def _detect_intent(
+        self,
+        question: str,
+    ):
+        """
+        Detect the primary and secondary query intents.
+        """
 
         logger.info(
             "Detecting query intent..."
         )
 
-        intent_analysis = (
-            self.intent_detector.detect(
-                question
-            )
+        return self.intent_detector.detect(
+            question
         )
 
-        # --------------------------------------------------
-        # 5. Retrieve relevant schema
-        # --------------------------------------------------
+    # ------------------------------------------------------
+
+    def _retrieve_schema(
+        self,
+        schema: dict,
+        question: str,
+        documents: list[SchemaDocument],
+    ) -> dict:
+        """
+        Retrieve the most relevant database schema
+        using the configured retrieval strategy.
+        """
 
         logger.info(
             "Retrieving relevant schema..."
@@ -217,9 +466,25 @@ class QueryService:
             )
         )
 
-        # --------------------------------------------------
-        # 6. Compress schema
-        # --------------------------------------------------
+        if not relevant_schema:
+            logger.warning(
+                "Schema retrieval returned no tables."
+            )
+
+        return relevant_schema
+
+    # ------------------------------------------------------
+
+    def _compress_schema(
+        self,
+        schema: dict,
+        question: str,
+        intent,
+    ) -> dict:
+        """
+        Remove unnecessary schema information before
+        sending the schema to the LLM.
+        """
 
         logger.info(
             "Compressing relevant schema..."
@@ -227,15 +492,28 @@ class QueryService:
 
         compressed_schema = (
             self.schema_compressor.compress(
-                schema=relevant_schema,
+                schema=schema,
                 question=question,
-                intent=intent_analysis,
+                intent=intent,
             )
         )
 
-        # --------------------------------------------------
-        # 7. Format schema
-        # --------------------------------------------------
+        logger.info(
+            "Schema compression completed."
+        )
+
+        return compressed_schema
+
+    # ------------------------------------------------------
+
+    def _format_schema(
+        self,
+        schema: dict,
+    ) -> str:
+        """
+        Convert compressed schema into the textual
+        representation used by the LLM prompt.
+        """
 
         logger.info(
             "Formatting schema for prompt..."
@@ -243,41 +521,72 @@ class QueryService:
 
         formatted_schema = (
             self.schema_formatter.format(
-                compressed_schema
+                schema
             )
         )
 
-        # --------------------------------------------------
-        # 8. Retrieve few-shot examples
-        # --------------------------------------------------
+        return formatted_schema
+
+    # ------------------------------------------------------
+
+    def _retrieve_examples(
+        self,
+        intent,
+    ):
+        """
+        Retrieve relevant few-shot SQL examples.
+        """
 
         logger.info(
             "Retrieving prompt examples..."
         )
 
-        examples = (
-            self.example_retriever.retrieve(
-                analysis=intent_analysis,
-            )
+        return self.example_retriever.retrieve(
+            analysis=intent
         )
 
-        # --------------------------------------------------
-        # 9. Build prompt
-        # --------------------------------------------------
+    # ------------------------------------------------------
+
+    def _build_prompt(
+        self,
+        schema: str,
+        question: str,
+        intent,
+        examples,
+    ) -> str:
+        """
+        Build the final SQL-generation prompt.
+        """
 
         logger.info(
             "Building SQL generation prompt..."
         )
 
-        prompt = self.prompt_builder.build_prompt(
-            schema=formatted_schema,
+        return self.prompt_builder.build_prompt(
+            schema=schema,
             user_question=question,
-            intent=intent_analysis,
+            intent=intent,
             examples=examples,
         )
 
+    # ------------------------------------------------------
+
+    def _generate_and_validate_sql(
+        self,
+        prompt: str,
+        question: str,
+        formatted_schema: str,
+        full_schema: dict,
+    ) -> str:
+        """
+        Generate SQL and validate it.
+
+        If validation fails, attempt one self-correction
+        pass and validate the corrected SQL again.
+        """
+
         # --------------------------------------------------
-        # 10. Generate SQL
+        # Generate SQL
         # --------------------------------------------------
 
         logger.info(
@@ -288,8 +597,13 @@ class QueryService:
             prompt
         )
 
+        if not sql or not sql.strip():
+            raise RuntimeError(
+                "LLM returned an empty SQL query."
+            )
+
         # --------------------------------------------------
-        # 11. Validate SQL
+        # First validation
         # --------------------------------------------------
 
         logger.info(
@@ -297,24 +611,29 @@ class QueryService:
         )
 
         try:
-
             validated_sql = (
                 self.sql_validator.validate(
                     sql,
-                    schema,
+                    full_schema,
                 )
             )
 
-        # --------------------------------------------------
-        # 12. Self-correction
-        # --------------------------------------------------
+            logger.info(
+                "Generated SQL passed validation."
+            )
+
+            return validated_sql
 
         except SQLValidationError as exc:
 
             logger.warning(
                 "Generated SQL failed validation. "
-                "Attempting SQL correction..."
+                "Attempting SQL correction."
             )
+
+            # --------------------------------------------------
+            # SQL Correction
+            # --------------------------------------------------
 
             corrected_sql = (
                 self.sql_corrector.correct(
@@ -325,41 +644,71 @@ class QueryService:
                 )
             )
 
+            if (
+                not corrected_sql
+                or not corrected_sql.strip()
+            ):
+                raise SQLValidationError(
+                    "SQL correction returned an empty query."
+                )
+
+            # --------------------------------------------------
+            # Validate corrected SQL
+            # --------------------------------------------------
+
             logger.info(
                 "Validating corrected SQL..."
             )
 
-            validated_sql = (
-                self.sql_validator.validate(
-                    corrected_sql,
-                    schema,
+            try:
+                validated_sql = (
+                    self.sql_validator.validate(
+                        corrected_sql,
+                        full_schema,
+                    )
                 )
+
+            except SQLValidationError:
+                logger.error(
+                    "Corrected SQL failed validation."
+                )
+                raise
+
+            logger.info(
+                "Corrected SQL passed validation."
             )
 
-        # --------------------------------------------------
-        # 13. Execute SQL
-        # --------------------------------------------------
+            return validated_sql
+
+    # ------------------------------------------------------
+
+    def _execute_sql(
+        self,
+        sql: str,
+    ):
+        """
+        Execute validated SQL against the database.
+        """
 
         logger.info(
             "Executing validated SQL..."
         )
 
-        results = self.sql_executor.execute(
-            validated_sql
+        results = (
+            self.sql_executor.execute(
+                sql
+            )
         )
-
-        # --------------------------------------------------
-        # 14. Return response
-        # --------------------------------------------------
 
         logger.info(
-            "Query completed successfully."
+            "SQL execution completed."
         )
 
-        return SQLResponse(
-            sql=validated_sql,
-            results=results,
-        )
+        return results
+
+    # ======================================================
+    # INDEX MANAGEMENT
+    # ======================================================
 
     def rebuild_index(
         self,
@@ -370,6 +719,11 @@ class QueryService:
 
         Use this when the database schema changes.
         """
+
+        if not documents:
+            raise ValueError(
+                "Cannot rebuild schema index without documents."
+            )
 
         logger.info(
             "Rebuilding schema vector index..."
@@ -382,4 +736,3 @@ class QueryService:
         logger.info(
             "Schema vector index rebuilt successfully."
         )
-

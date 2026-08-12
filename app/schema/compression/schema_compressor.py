@@ -6,26 +6,15 @@ from app.models.intent import QueryIntent
 
 class SchemaCompressor:
     """
-    Compresses database schema information before it is
-    sent to the LLM.
+    Compresses database schema before it is sent to the LLM.
 
-    The goal is to preserve columns that are important for:
-
-    - SELECT operations
-    - WHERE filtering
-    - JOIN operations
-    - GROUP BY operations
-    - ORDER BY operations
-    - Aggregations
-    - Time-series queries
-    - Primary keys
-    - Foreign keys
-
-    while removing irrelevant columns to reduce prompt size.
+    The compressor keeps only information that is likely to be
+    required for SQL generation while preserving keys and
+    relationships needed for JOINs.
     """
 
     # --------------------------------------------------
-    # Commonly useful columns
+    # Common semantic columns
     # --------------------------------------------------
 
     COMMON_COLUMNS = {
@@ -37,24 +26,41 @@ class SchemaCompressor:
         "amount",
         "price",
         "quantity",
-        "date",
-        "created_at",
-        "updated_at",
+        "total",
     }
 
     # --------------------------------------------------
-    # Aggregation-related column names
+    # Intent-specific column keywords
     # --------------------------------------------------
 
-    AGGREGATION_KEYWORDS = {
+    AGGREGATION_COLUMNS = {
         "amount",
         "price",
         "cost",
         "total",
         "quantity",
-        "count",
         "salary",
         "revenue",
+        "count",
+    }
+
+    TIME_COLUMNS = {
+        "date",
+        "time",
+        "created_at",
+        "updated_at",
+        "timestamp",
+    }
+
+    SORT_COLUMNS = {
+        "amount",
+        "price",
+        "quantity",
+        "total",
+        "date",
+        "created_at",
+        "updated_at",
+        "name",
     }
 
     # --------------------------------------------------
@@ -68,24 +74,17 @@ class SchemaCompressor:
         intent: IntentAnalysis,
     ) -> dict:
         """
-        Compress the supplied schema according to the
-        user's question and detected intent.
+        Compress the supplied schema.
 
-        Parameters
-        ----------
-        schema:
-            Relevant schema returned by SchemaRetriever.
+        The compression process preserves:
 
-        question:
-            Original natural-language question.
+        1. Explicitly mentioned columns.
+        2. Primary keys.
+        3. Foreign keys.
+        4. Intent-specific columns.
+        5. Common semantic columns.
 
-        intent:
-            Result produced by IntentDetector.
-
-        Returns
-        -------
-        dict
-            Compressed schema suitable for prompt generation.
+        Everything else is removed.
         """
 
         if not schema:
@@ -97,11 +96,14 @@ class SchemaCompressor:
 
         for table_name, table in schema.items():
 
-            compressed[table_name] = self._compress_table(
+            compressed_table = self._compress_table(
+                table_name=table_name,
                 table=table,
                 tokens=tokens,
                 intent=intent,
             )
+
+            compressed[table_name] = compressed_table
 
         return compressed
 
@@ -110,9 +112,7 @@ class SchemaCompressor:
     # --------------------------------------------------
 
     @staticmethod
-    def _tokenize(
-        question: str,
-    ) -> set[str]:
+    def _tokenize(question: str) -> set[str]:
         """
         Convert the question into normalized tokens.
         """
@@ -125,28 +125,29 @@ class SchemaCompressor:
         )
 
     # --------------------------------------------------
-    # Table Compression
+    # Table compression
     # --------------------------------------------------
 
     def _compress_table(
         self,
+        table_name: str,
         table: dict,
         tokens: set[str],
         intent: IntentAnalysis,
     ) -> dict:
         """
         Compress a single table while preserving
-        structurally important information.
+        relationship information.
         """
 
-        original_columns = table.get(
+        columns = table.get(
             "columns",
             [],
         )
 
         kept_columns = [
             column
-            for column in original_columns
+            for column in columns
             if self._keep_column(
                 column=column,
                 table=table,
@@ -159,10 +160,12 @@ class SchemaCompressor:
         # Safety fallback
         # --------------------------------------------------
 
-        # If nothing matched, preserve a small number of
-        # columns rather than sending an empty table schema.
-        if not kept_columns:
-            kept_columns = original_columns[:3]
+        # A table should never become completely unusable.
+        #
+        # If no column survived compression, keep the first
+        # few columns as a safety fallback.
+        if not kept_columns and columns:
+            kept_columns = columns[:3]
 
         return {
             "columns": kept_columns,
@@ -177,7 +180,7 @@ class SchemaCompressor:
         }
 
     # --------------------------------------------------
-    # Column Selection
+    # Column decision
     # --------------------------------------------------
 
     def _keep_column(
@@ -188,18 +191,19 @@ class SchemaCompressor:
         intent: IntentAnalysis,
     ) -> bool:
         """
-        Determine whether a column should be preserved.
+        Decide whether a column should remain in the
+        compressed schema.
         """
 
-        name = column.get("name")
+        column_name = column.get("name")
 
-        if not name:
+        if not column_name:
             return False
 
-        name = name.lower()
+        name = column_name.lower()
 
         # --------------------------------------------------
-        # 1. Direct question match
+        # 1. Explicit question match
         # --------------------------------------------------
 
         if name in tokens:
@@ -220,8 +224,8 @@ class SchemaCompressor:
         )
 
         if name in {
-            column.lower()
-            for column in constrained_columns
+            key.lower()
+            for key in constrained_columns
         }:
             return True
 
@@ -233,15 +237,14 @@ class SchemaCompressor:
             "foreign_keys",
             [],
         ):
-
             constrained_columns = foreign_key.get(
                 "constrained_columns",
                 [],
             )
 
             if name in {
-                column.lower()
-                for column in constrained_columns
+                key.lower()
+                for key in constrained_columns
             }:
                 return True
 
@@ -249,18 +252,20 @@ class SchemaCompressor:
         # 4. Identifier columns
         # --------------------------------------------------
 
-        if name == "id":
-            return True
-
         if name.endswith("_id"):
             return True
 
         # --------------------------------------------------
-        # 5. Common useful columns
+        # 5. Aggregation intent
         # --------------------------------------------------
 
-        if name in self.COMMON_COLUMNS:
-            return True
+        if intent.primary == QueryIntent.AGGREGATION:
+
+            if self._matches_keywords(
+                name,
+                self.AGGREGATION_COLUMNS,
+            ):
+                return True
 
         # --------------------------------------------------
         # 6. Time-series intent
@@ -268,64 +273,51 @@ class SchemaCompressor:
 
         if intent.primary == QueryIntent.TIME_SERIES:
 
-            if any(
-                keyword in name
-                for keyword in (
-                    "date",
-                    "time",
-                    "month",
-                    "year",
-                )
+            if self._matches_keywords(
+                name,
+                self.TIME_COLUMNS,
             ):
                 return True
 
         # --------------------------------------------------
-        # 7. Aggregation intent
-        # --------------------------------------------------
-
-        if intent.primary == QueryIntent.AGGREGATION:
-
-            if any(
-                keyword in name
-                for keyword in self.AGGREGATION_KEYWORDS
-            ):
-                return True
-
-        # --------------------------------------------------
-        # 8. Group-by intent
-        # --------------------------------------------------
-
-        if intent.primary == QueryIntent.GROUP_BY:
-
-            if name in {
-                "name",
-                "title",
-                "category",
-                "type",
-                "status",
-                "city",
-                "country",
-                "date",
-            }:
-                return True
-
-        # --------------------------------------------------
-        # 9. Sort intent
+        # 7. Sorting intent
         # --------------------------------------------------
 
         if intent.primary == QueryIntent.SORT:
 
-            if any(
-                keyword in name
-                for keyword in (
-                    "amount",
-                    "price",
-                    "total",
-                    "date",
-                    "created_at",
-                    "quantity",
-                )
+            if self._matches_keywords(
+                name,
+                self.SORT_COLUMNS,
             ):
                 return True
 
+        # --------------------------------------------------
+        # 8. Common semantic columns
+        # --------------------------------------------------
+
+        if name in self.COMMON_COLUMNS:
+            return True
+
         return False
+
+    # --------------------------------------------------
+    # Keyword matching
+    # --------------------------------------------------
+
+    @staticmethod
+    def _matches_keywords(
+        column_name: str,
+        keywords: set[str],
+    ) -> bool:
+        """
+        Check whether a column matches one of the
+        supplied semantic keywords.
+        """
+
+        if column_name in keywords:
+            return True
+
+        return any(
+            keyword in column_name
+            for keyword in keywords
+        )
