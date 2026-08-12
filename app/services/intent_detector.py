@@ -1,7 +1,11 @@
 import re 
+import logging
+
 from app.models.intent import QueryIntent
 from app.models.intent_analysis import IntentAnalysis
 
+logger = logging.getLogger(__name__)
+    
 class IntentDetector:
     """
     Detects the user's query intent.
