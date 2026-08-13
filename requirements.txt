@@ -29,3 +29,4 @@ uvicorn==0.50.2
 faiss-cpu
 numpy
 pylance
+pytest

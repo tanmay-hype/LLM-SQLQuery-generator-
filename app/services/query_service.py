@@ -13,18 +13,38 @@ from app.llm.prompt_examples.retriever import ExampleRetriever
 from app.models.response import SQLResponse
 
 from app.schema.compression.schema_compressor import SchemaCompressor
+
 from app.schema.embeddings.gemini_embedding_service import (
     GeminiEmbeddingService,
 )
+
 from app.schema.indexing.schema_index_service import (
     SchemaIndexService,
 )
+
 from app.schema.models.schema_document import SchemaDocument
-from app.schema.schema_document_builder import SchemaDocumentBuilder
+
+from app.schema.retrievers.keywords_retriever import (
+    KeywordRetriever,
+)
+
+from app.schema.retrievers.semantic_retriever import (
+    SemanticRetriever,
+)
+
+from app.schema.schema_document_builder import (
+    SchemaDocumentBuilder,
+)
+
 from app.schema.schema_formatter import SchemaFormatter
+
 from app.schema.schema_loader import SchemaLoader
+
 from app.schema.schema_retriever import SchemaRetriever
-from app.schema.vector_store.faiss_store import FAISSVectorStore
+
+from app.schema.vector_store.faiss_store import (
+    FAISSVectorStore,
+)
 
 from app.services.intent_detector import IntentDetector
 from app.services.sql_executor import SQLExecutor
@@ -50,7 +70,7 @@ class QueryService:
                 ↓
         Intent Detection
                 ↓
-        Hybrid Schema Retrieval
+        Keyword + Semantic Schema Retrieval
                 ↓
         Schema Compression
                 ↓
@@ -81,9 +101,9 @@ class QueryService:
             SQLAlchemy database engine.
         """
 
-        # --------------------------------------------------
-        # Database / Schema
-        # --------------------------------------------------
+        # ==================================================
+        # DATABASE / SCHEMA
+        # ==================================================
 
         self.schema_loader = SchemaLoader(db_engine)
 
@@ -95,47 +115,60 @@ class QueryService:
 
         self.schema_formatter = SchemaFormatter()
 
-        # --------------------------------------------------
-        # Embedding Service
-        # --------------------------------------------------
+        # ==================================================
+        # EMBEDDING SERVICE
+        # ==================================================
 
         self.embedding_service = (
             GeminiEmbeddingService()
         )
 
-        # --------------------------------------------------
-        # Vector Store
-        # --------------------------------------------------
+        # ==================================================
+        # VECTOR STORE
+        # ==================================================
 
         self.vector_store = FAISSVectorStore()
 
-        # --------------------------------------------------
-        # Schema Index
-        # --------------------------------------------------
+        # ==================================================
+        # SCHEMA INDEX
+        # ==================================================
 
         self.schema_index_service = SchemaIndexService(
             embedding_service=self.embedding_service,
             vector_store=self.vector_store,
         )
 
-        # --------------------------------------------------
-        # Schema Retrieval
-        # --------------------------------------------------
+        # ==================================================
+        # SCHEMA RETRIEVERS
+        # ==================================================
 
-        self.schema_retriever = SchemaRetriever(
+        self.keyword_retriever = KeywordRetriever()
+
+        self.semantic_retriever = SemanticRetriever(
             embedding_service=self.embedding_service,
             vector_store=self.vector_store,
         )
 
-        # --------------------------------------------------
-        # Intent Detection
-        # --------------------------------------------------
+        # ==================================================
+        # SCHEMA RETRIEVER COORDINATOR
+        # ==================================================
+
+        self.schema_retriever = SchemaRetriever(
+            retrievers=[
+                self.keyword_retriever,
+                self.semantic_retriever,
+            ]
+        )
+
+        # ==================================================
+        # INTENT DETECTION
+        # ==================================================
 
         self.intent_detector = IntentDetector()
 
-        # --------------------------------------------------
-        # Few-Shot Examples
-        # --------------------------------------------------
+        # ==================================================
+        # FEW-SHOT EXAMPLES
+        # ==================================================
 
         self.example_repository = ExampleRepository()
 
@@ -143,9 +176,9 @@ class QueryService:
             self.example_repository
         )
 
-        # --------------------------------------------------
+        # ==================================================
         # LLM
-        # --------------------------------------------------
+        # ==================================================
 
         self.prompt_builder = PromptBuilder()
 
@@ -153,9 +186,9 @@ class QueryService:
 
         self.sql_corrector = SQLCorrector()
 
-        # --------------------------------------------------
-        # SQL Validation / Execution
-        # --------------------------------------------------
+        # ==================================================
+        # SQL VALIDATION / EXECUTION
+        # ==================================================
 
         self.sql_validator = SQLValidator()
 
@@ -222,6 +255,11 @@ class QueryService:
         logger.info(
             "Detected primary intent: %s",
             intent_analysis.primary,
+        )
+
+        logger.info(
+            "Detected secondary intents: %s",
+            intent_analysis.secondary,
         )
 
         # --------------------------------------------------
@@ -451,7 +489,12 @@ class QueryService:
     ) -> dict:
         """
         Retrieve the most relevant database schema
-        using the configured retrieval strategy.
+        using the configured schema retriever.
+
+        SchemaRetriever acts as the coordinator for:
+
+            KeywordRetriever
+            SemanticRetriever
         """
 
         logger.info(
@@ -534,7 +577,8 @@ class QueryService:
         intent,
     ):
         """
-        Retrieve relevant few-shot SQL examples.
+        Retrieve relevant few-shot SQL examples
+        based on the detected query intent.
         """
 
         logger.info(
