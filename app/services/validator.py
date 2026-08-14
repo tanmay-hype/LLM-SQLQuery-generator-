@@ -6,7 +6,7 @@ from app.exceptions import SQLValidationError
 try:
     from sqlglot import exp, parse_one
     from sqlglot.errors import ParseError
-except ImportError:  # pragma: no cover - depends on runtime environment
+except ImportError:  # pragma: no cover
     exp = None
     parse_one = None
     ParseError = Exception
@@ -25,13 +25,18 @@ class SQLValidator:
     5. Validate SQL syntax using sqlglot.
     6. Validate referenced tables against the database schema.
     7. Validate referenced columns against the database schema.
-    8. Allow SQL aliases such as:
+    8. Support table aliases.
+    9. Support CTEs.
+    10. Support SELECT aliases in GROUP BY / ORDER BY.
 
-           SELECT DATE_TRUNC('month', order_date) AS month
-           GROUP BY month
-           ORDER BY month
+    Example supported query:
 
-    9. Support table aliases and CTEs.
+        SELECT
+            DATE_TRUNC('month', order_date) AS month,
+            COUNT(id) AS order_count
+        FROM orders
+        GROUP BY month
+        ORDER BY month;
     """
 
     FORBIDDEN_KEYWORDS = {
@@ -57,18 +62,23 @@ class SQLValidator:
         schema: dict,
     ) -> str:
         """
-        Validate SQL.
+        Validate generated SQL.
 
         Returns
         -------
         str
-            Cleaned SQL if validation succeeds.
+            Validated SQL.
 
         Raises
         ------
         SQLValidationError
             If the SQL is invalid or unsafe.
         """
+
+        if not isinstance(sql, str):
+            raise SQLValidationError(
+                "Generated SQL must be a string."
+            )
 
         sql = sql.strip()
 
@@ -78,9 +88,13 @@ class SQLValidator:
             )
 
         cls._validate_single_statement(sql)
+
         cls._validate_select_only(sql)
+
         cls._validate_forbidden_keywords(sql)
+
         cls._validate_comments(sql)
+
         cls._validate_against_schema(
             sql=sql,
             schema=schema,
@@ -97,7 +111,7 @@ class SQLValidator:
         sql: str,
     ) -> None:
         """
-        Ensure that only one SQL statement is present.
+        Ensure that SQL contains only one statement.
         """
 
         statements = [
@@ -119,16 +133,28 @@ class SQLValidator:
     ) -> None:
         """
         Only SELECT statements are allowed.
+
+        CTE queries beginning with WITH are also valid,
+        because they ultimately contain a SELECT.
         """
 
-        if not re.match(
+        if re.match(
             r"^\s*SELECT\b",
             sql,
             re.IGNORECASE,
         ):
-            raise SQLValidationError(
-                "Only SELECT statements are allowed."
-            )
+            return
+
+        if re.match(
+            r"^\s*WITH\b",
+            sql,
+            re.IGNORECASE,
+        ):
+            return
+
+        raise SQLValidationError(
+            "Only SELECT statements are allowed."
+        )
 
     # ------------------------------------------------------
 
@@ -184,8 +210,7 @@ class SQLValidator:
         schema: dict,
     ) -> None:
         """
-        Validate tables, columns, aliases and CTEs
-        against the supplied database schema.
+        Validate SQL against the supplied database schema.
         """
 
         if parse_one is None or exp is None:
@@ -213,14 +238,14 @@ class SQLValidator:
         # Validate schema
         # --------------------------------------------------
 
-        schema_table_names = set(
-            schema.keys()
-        )
-
-        if not schema_table_names:
+        if not schema:
             raise SQLValidationError(
                 "Schema is empty; cannot validate SQL."
             )
+
+        schema_table_names = set(
+            schema.keys()
+        )
 
         # ==================================================
         # CTE NAMES
@@ -228,7 +253,9 @@ class SQLValidator:
 
         cte_names = {
             cte.alias_or_name
-            for cte in statement.find_all(exp.CTE)
+            for cte in statement.find_all(
+                exp.CTE
+            )
             if cte.alias_or_name
         }
 
@@ -237,16 +264,19 @@ class SQLValidator:
         # ==================================================
 
         table_alias_to_name: dict[str, str] = {}
+
         referenced_tables: set[str] = set()
 
-        for table in statement.find_all(exp.Table):
+        for table in statement.find_all(
+            exp.Table
+        ):
 
             table_name = table.name
 
             if not table_name:
                 continue
 
-            # A CTE is not a physical database table.
+            # CTE references are not physical DB tables.
             if table_name in cte_names:
                 continue
 
@@ -254,7 +284,7 @@ class SQLValidator:
                 table_name
             )
 
-            alias = table.alias_or_name
+            alias = table.alias
 
             if alias:
                 table_alias_to_name[alias] = (
@@ -262,7 +292,7 @@ class SQLValidator:
                 )
 
         # --------------------------------------------------
-        # Unknown tables
+        # Validate table names
         # --------------------------------------------------
 
         unknown_tables = sorted(
@@ -292,14 +322,14 @@ class SQLValidator:
             for table_name, table_info in schema.items()
         }
 
-        # --------------------------------------------------
-        # Columns available from referenced tables
-        # --------------------------------------------------
+        # ==================================================
+        # AVAILABLE PHYSICAL COLUMNS
+        # ==================================================
 
         referenced_schema_tables = {
             table_name
             for table_name in referenced_tables
-            if table_name in schema
+            if table_name in schema_columns_by_table
         }
 
         available_columns: set[str] = set()
@@ -317,8 +347,10 @@ class SQLValidator:
         # SELECT ALIASES
         # ==================================================
 
-        select_aliases = cls._extract_select_aliases(
-            statement
+        select_aliases = (
+            cls._extract_select_aliases(
+                statement
+            )
         )
 
         # ==================================================
@@ -334,21 +366,18 @@ class SQLValidator:
             if not column_name:
                 continue
 
-            # "*" is not a real column reference.
+            # --------------------------------------------------
+            # Wildcard
+            # --------------------------------------------------
+
             if column_name == "*":
                 continue
 
             qualifier = column.table
 
-            # --------------------------------------------------
-            # Qualified column
-            #
-            # Example:
-            #
-            # c.name
-            # o.total_amount
-            # customers.name
-            # --------------------------------------------------
+            # ==================================================
+            # QUALIFIED COLUMN
+            # ==================================================
 
             if qualifier:
 
@@ -359,6 +388,17 @@ class SQLValidator:
                     )
                 )
 
+                # --------------------------------------------------
+                # CTE column references
+                # --------------------------------------------------
+
+                if qualifier in cte_names:
+                    continue
+
+                # --------------------------------------------------
+                # Unknown table / alias
+                # --------------------------------------------------
+
                 if (
                     table_name
                     not in schema_columns_by_table
@@ -368,6 +408,10 @@ class SQLValidator:
                         f"in column reference: "
                         f"{qualifier}.{column_name}"
                     )
+
+                # --------------------------------------------------
+                # Unknown physical column
+                # --------------------------------------------------
 
                 if (
                     column_name
@@ -382,21 +426,31 @@ class SQLValidator:
 
                 continue
 
-            # --------------------------------------------------
-            # Unqualified column
-            # --------------------------------------------------
+            # ==================================================
+            # UNQUALIFIED COLUMN
+            # ==================================================
 
-            # SQL aliases are allowed in clauses such as:
+            # --------------------------------------------------
+            # SELECT alias
             #
+            # We allow SELECT aliases because PostgreSQL
+            # allows them in GROUP BY and ORDER BY.
+            #
+            # Example:
+            #
+            # SELECT
+            #     DATE_TRUNC('month', order_date) AS month
+            # FROM orders
             # GROUP BY month
             # ORDER BY month
-            #
-            # where "month" may have been defined as:
-            #
-            # DATE_TRUNC(...) AS month
-            #
+            # --------------------------------------------------
+
             if column_name in select_aliases:
-                continue
+
+                if cls._is_allowed_alias_reference(
+                    column
+                ):
+                    continue
 
             # --------------------------------------------------
             # Physical database column
@@ -418,7 +472,7 @@ class SQLValidator:
         statement,
     ) -> set[str]:
         """
-        Extract aliases defined in the SELECT clause.
+        Extract aliases defined in SELECT expressions.
 
         Example:
 
@@ -435,41 +489,33 @@ class SQLValidator:
                 "month",
                 "order_count"
             }
-
-        These aliases may subsequently be referenced
-        by clauses such as ORDER BY and GROUP BY.
         """
 
         aliases: set[str] = set()
 
         # --------------------------------------------------
-        # Find SELECT expressions
+        # Locate SELECT node
         # --------------------------------------------------
-
-        select_expressions = []
 
         if isinstance(
             statement,
             exp.Select,
         ):
-            select_expressions = (
-                statement.expressions
-            )
+            select_node = statement
+
         else:
             select_node = statement.find(
                 exp.Select
             )
 
-            if select_node is not None:
-                select_expressions = (
-                    select_node.expressions
-                )
+        if select_node is None:
+            return aliases
 
         # --------------------------------------------------
         # Extract aliases
         # --------------------------------------------------
 
-        for expression in select_expressions:
+        for expression in select_node.expressions:
 
             alias = getattr(
                 expression,
@@ -478,6 +524,80 @@ class SQLValidator:
             )
 
             if alias:
-                aliases.add(alias)
+                aliases.add(
+                    alias
+                )
 
         return aliases
+
+    # ======================================================
+    # ALIAS REFERENCE VALIDATION
+    # ======================================================
+
+    @staticmethod
+    def _is_allowed_alias_reference(
+        column,
+    ) -> bool:
+        """
+        Determine whether a SELECT alias is being used
+        in a clause where it is valid to reference it.
+
+        PostgreSQL commonly allows SELECT aliases in:
+
+            ORDER BY
+            GROUP BY
+
+        but not generally in:
+
+            WHERE
+            HAVING
+            JOIN ON
+
+        This method walks up the sqlglot AST and determines
+        the clause containing the column reference.
+        """
+
+        current = column
+
+        while current is not None:
+
+            # --------------------------------------------------
+            # ORDER BY
+            # --------------------------------------------------
+
+            if isinstance(
+                current,
+                exp.Order,
+            ):
+                return True
+
+            # --------------------------------------------------
+            # GROUP BY
+            # --------------------------------------------------
+
+            if isinstance(
+                current,
+                exp.Group,
+            ):
+                return True
+
+            # --------------------------------------------------
+            # SELECT expression
+            #
+            # A SELECT alias definition itself should not be
+            # treated as a reference to the alias.
+            # --------------------------------------------------
+
+            if isinstance(
+                current,
+                exp.Alias,
+            ):
+                return False
+
+            current = getattr(
+                current,
+                "parent",
+                None,
+            )
+
+        return False
