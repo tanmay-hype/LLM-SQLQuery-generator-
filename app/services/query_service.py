@@ -47,6 +47,7 @@ from app.schema.vector_store.faiss_store import (
 )
 
 from app.services.intent_detector import IntentDetector
+from app.services.semantic_validator import SemanticValidator
 from app.services.sql_executor import SQLExecutor
 from app.services.validator import SQLValidator
 
@@ -194,6 +195,12 @@ class QueryService:
 
         self.sql_executor = SQLExecutor()
 
+        # ==================================================
+        # SEMANTIC VALIDATION
+        # ==================================================
+
+        self.semantic_validator = SemanticValidator()
+
     # ======================================================
     # PUBLIC API
     # ======================================================
@@ -337,6 +344,7 @@ class QueryService:
                 question=question,
                 formatted_schema=formatted_schema,
                 full_schema=schema,
+                intent=intent_analysis,
             )
         )
 
@@ -621,12 +629,25 @@ class QueryService:
         question: str,
         formatted_schema: str,
         full_schema: dict,
+        intent,
     ) -> str:
         """
         Generate SQL and validate it.
 
         If validation fails, attempt one self-correction
         pass and validate the corrected SQL again.
+         
+         LLM generation
+            ↓
+        Structural validation
+            ↓
+        Semantic validation
+            ↓
+        SQL correction if required
+            ↓
+        Structural validation
+            ↓
+        Semantic validation
         """
 
         # --------------------------------------------------
@@ -647,7 +668,7 @@ class QueryService:
             )
 
         # --------------------------------------------------
-        # First validation
+        # First structural validation
         # --------------------------------------------------
 
         logger.info(
@@ -661,12 +682,6 @@ class QueryService:
                     full_schema,
                 )
             )
-
-            logger.info(
-                "Generated SQL passed validation."
-            )
-
-            return validated_sql
 
         except SQLValidationError as exc:
 
@@ -704,25 +719,103 @@ class QueryService:
                 "Validating corrected SQL..."
             )
 
-            try:
-                validated_sql = (
-                    self.sql_validator.validate(
-                        corrected_sql,
-                        full_schema,
-                    )
+            validated_sql = (
+                self.sql_validator.validate(
+                    corrected_sql,
+                    full_schema,
                 )
-
-            except SQLValidationError:
-                logger.error(
-                    "Corrected SQL failed validation."
-                )
-                raise
-
-            logger.info(
-                "Corrected SQL passed validation."
             )
-
+            
+            # ==================================================
+            # SEMANTIC VALIDATION
+            # ==================================================
+        
+        logger.info(
+            "Performing semantic validation of SQL..."
+        )
+        
+        semantic_result = (self.semantic_validator.validate(
+            sql=validated_sql,
+            schema=full_schema,
+            question=question,
+            intent=intent,
+        )
+        )
+        
+        if semantic_result.valid:
+            logger.info(
+                "Semantic validation passed."
+            )
             return validated_sql
+        
+    # ==================================================
+    # SEMANTIC CORRECTION
+    # ==================================================
+        
+        semantic_error = "\n".join(semantic_result.errors)
+        
+        logger.warning(
+            "Semantic validation failed: %s",
+            semantic_error,
+        )
+        
+        corrected_sql = (
+            self.sql_corrector.correct(
+                question=question,
+                schema=formatted_schema,
+                invalid_sql=validated_sql,
+                validation_error=semantic_error,
+            )
+        )
+        
+        if (
+            not corrected_sql
+            or not corrected_sql.strip()
+        ):
+            raise SQLValidationError(
+                "Semantic correction returned an empty query."
+            )
+            
+    # ==================================================
+    # SECOND STRUCTURAL VALIDATION
+    # ==================================================
+        
+        corrected_sql = (
+            self.sql_validator.validate(
+                corrected_sql,
+                full_schema,
+            )
+        )
+        
+    # ==================================================
+    # SECOND SEMANTIC VALIDATION
+    # ==================================================
+        
+        logger.info(
+            "re-validating corrected SQL semantically..."
+        )
+        
+        corrected_semantic_result = (
+            self.semantic_validator.validate(
+                sql=corrected_sql,
+                schema=full_schema,
+                question=question,
+                intent=intent,
+            )
+        )
+        
+        if not corrected_semantic_result.valid:
+            corrected_semantic_error = "\n".join(corrected_semantic_result.errors)
+            raise SQLValidationError(
+                f"Corrected SQL failed semantic validation: {corrected_semantic_error}"
+            )
+        
+        logger.info(
+            "Corrected SQL passed semantic validation."
+        )
+        
+        return corrected_sql
+
 
     # ------------------------------------------------------
 
