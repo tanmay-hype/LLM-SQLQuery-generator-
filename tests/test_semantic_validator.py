@@ -1,6 +1,6 @@
-
-from app.services.semantic_validator import SemanticValidator
+from app.models.intent import QueryIntent
 from app.services.intent_detector import IntentDetector
+from app.services.semantic_validator import SemanticValidator
 
 
 detector = IntentDetector()
@@ -12,12 +12,8 @@ schema = {
         "columns": [
             {"name": "id"},
             {"name": "name"},
-            {"name": "email"},
-            {"name": "city"},
-            {"name": "created_at"},
         ]
     },
-
     "orders": {
         "columns": [
             {"name": "id"},
@@ -26,7 +22,14 @@ schema = {
             {"name": "total_amount"},
         ]
     },
-
+    "order_items": {
+        "columns": [
+            {"name": "id"},
+            {"name": "order_id"},
+            {"name": "product_id"},
+            {"name": "quantity"},
+        ]
+    },
     "products": {
         "columns": [
             {"name": "id"},
@@ -34,20 +37,10 @@ schema = {
             {"name": "price"},
         ]
     },
-
-    "order_items": {
-        "columns": [
-            {"name": "id"},
-            {"name": "order_id"},
-            {"name": "product_id"},
-            {"name": "quantity"},
-            {"name": "unit_price"},
-        ]
-    },
 }
 
 
-tests = [
+TEST_CASES = [
     {
         "question": "Show all customers",
         "sql": """
@@ -55,7 +48,6 @@ tests = [
             FROM customers;
         """,
     },
-
     {
         "question": "Which customers have placed orders?",
         "sql": """
@@ -66,7 +58,6 @@ tests = [
                 ON c.id = o.customer_id;
         """,
     },
-
     {
         "question": "Show total order amount per customer",
         "sql": """
@@ -76,10 +67,11 @@ tests = [
             FROM customers AS c
             JOIN orders AS o
                 ON c.id = o.customer_id
-            GROUP BY c.id, c.name;
+            GROUP BY
+                c.id,
+                c.name;
         """,
     },
-
     {
         "question": "Show monthly order trends",
         "sql": """
@@ -91,7 +83,6 @@ tests = [
             ORDER BY month;
         """,
     },
-
     {
         "question": "Show the most recent orders",
         "sql": """
@@ -100,7 +91,6 @@ tests = [
             ORDER BY order_date DESC;
         """,
     },
-
     {
         "question": "Show top customers",
         "sql": """
@@ -110,11 +100,12 @@ tests = [
             FROM customers AS c
             JOIN orders AS o
                 ON c.id = o.customer_id
-            GROUP BY c.id, c.name
+            GROUP BY
+                c.id,
+                c.name
             ORDER BY total_spent DESC;
         """,
     },
-
     {
         "question": "Compare customer spending",
         "sql": """
@@ -124,7 +115,9 @@ tests = [
             FROM customers AS c
             JOIN orders AS o
                 ON c.id = o.customer_id
-            GROUP BY c.id, c.name
+            GROUP BY
+                c.id,
+                c.name
             ORDER BY total_spending DESC;
         """,
     },
@@ -132,28 +125,29 @@ tests = [
 
 
 print("=" * 80)
-print("SEMANTIC VALIDATOR TEST")
+print("SEMANTIC VALIDATOR POSITIVE TEST")
 print("=" * 80)
+
 
 passed = 0
 failed = 0
 
-for test in tests:
+
+for test in TEST_CASES:
 
     question = test["question"]
-    sql = test["sql"].strip()
+    sql = test["sql"]
 
-    print("\n" + "=" * 80)
-    print("QUESTION:", question)
+    print("=" * 80)
+    print(f"QUESTION: {question}")
     print("=" * 80)
 
-    intent = detector.detect(question)
-
-    print("PRIMARY INTENT:", intent.primary)
-    print("SECONDARY INTENTS:", intent.secondary)
-    print("CONFIDENCE:", intent.confidence)
-
     try:
+        intent = detector.detect(question)
+
+        print(f"PRIMARY INTENT: {intent.primary}")
+        print(f"SECONDARY INTENTS: {intent.secondary}")
+        print(f"CONFIDENCE: {intent.confidence}")
 
         result = validator.validate(
             question=question,
@@ -162,8 +156,9 @@ for test in tests:
             schema=schema,
         )
 
-        print("\nVALID:", result.valid)
-        print("ERRORS:", result.errors)
+        print()
+        print(f"VALID: {result.valid}")
+        print(f"ERRORS: {result.errors}")
 
         if result.valid:
             passed += 1
@@ -171,24 +166,26 @@ for test in tests:
             failed += 1
 
     except Exception as exc:
-
         failed += 1
 
-        print("\nEXCEPTION:", type(exc).__name__)
+        print()
+        print("EXCEPTION:", type(exc).__name__)
         print("MESSAGE:", str(exc))
 
 
 total = passed + failed
+efficiency = (
+    (passed / total) * 100
+    if total
+    else 0
+)
 
-print("\n" + "=" * 80)
+
+print()
+print("=" * 80)
 print("TEST SUMMARY")
 print("=" * 80)
-print("PASSED:", passed)
-print("FAILED:", failed)
-
-if total:
-    efficiency = (passed / total) * 100
-    print(f"EFFICIENCY: {efficiency:.2f}%")
-
+print(f"PASSED: {passed}")
+print(f"FAILED: {failed}")
+print(f"EFFICIENCY: {efficiency:.2f}%")
 print("=" * 80)
-
