@@ -13,6 +13,9 @@ services:
     env_file:
       - .env
 
+    volumes:
+      - schema_index_data:/app/storage
+
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,3 +66,4 @@ services:
 volumes:
   ollama_data:
   postgres_data:
+  schema_index_data:
