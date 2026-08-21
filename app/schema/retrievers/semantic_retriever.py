@@ -78,14 +78,17 @@ class SemanticRetriever(BaseSchemaRetriever):
             # in the current database schema.
             if table_name not in schema:
                 continue
+            
+            score = float(match.score)
+            
+            if (score < settings.schema_semantic_min_score):
+                continue
 
             selected_schema[table_name] = schema[
                 table_name
             ]
 
-            scores[table_name] = float(
-                match.score
-            )
+            scores[table_name] = score
 
         return RetrievalResult(
             schema=selected_schema,

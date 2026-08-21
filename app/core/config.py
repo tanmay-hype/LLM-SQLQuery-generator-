@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     schema_retrieval_top_k: int = 3
 
     schema_retrieval_min_score: int = 5
+    
+    schema_semantic_min_score: float = 0.60
 
     # ==================================================
     # Example Retrieval
