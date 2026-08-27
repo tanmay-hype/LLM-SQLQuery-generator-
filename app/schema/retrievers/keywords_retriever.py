@@ -9,23 +9,70 @@ from app.schema.retrievers.base import BaseSchemaRetriever
 
 class KeywordRetriever(BaseSchemaRetriever):
     """
-    Retrieves relevant database tables using keyword matching
-    against table names and column names.
+    Retrieves relevant database tables using deterministic
+    keyword matching against:
+
+        - table names
+        - table-name components
+        - column names
+        - foreign-key columns
+
+    Scoring intentionally prioritizes direct entity/table
+    matches over incidental foreign-key column matches.
+
+    Example:
+
+        "Show customer contact details"
+
+    should rank:
+
+        customers
+
+    above:
+
+        orders
+
+    even though orders contains customer_id.
     """
 
-    # --------------------------------------------------
-    # Scoring
-    # --------------------------------------------------
+    # ======================================================
+    # SCORING
+    # ======================================================
 
-    TABLE_EXACT_MATCH = 10
-    TABLE_PARTIAL_MATCH = 5
+    # Direct entity/table match.
+    #
+    # customer -> customers
+    # product  -> products
+    # order    -> orders
+    TABLE_ENTITY_MATCH = 12
 
-    COLUMN_EXACT_MATCH = 6
-    COLUMN_PARTIAL_MATCH = 3
+    # Match against the main/head component of a compound
+    # table name.
+    #
+    # item -> order_items
+    TABLE_HEAD_MATCH = 6
 
-    # --------------------------------------------------
-    # Retrieval
-    # --------------------------------------------------
+    # Match against a non-head component.
+    #
+    # order -> order_items
+    #
+    # Deliberately weaker than a direct orders match.
+    TABLE_COMPONENT_MATCH = 3
+
+    # Weak substring fallback.
+    TABLE_PARTIAL_MATCH = 2
+
+    # Normal physical columns.
+    COLUMN_EXACT_MATCH = 3
+    COLUMN_PARTIAL_MATCH = 1
+
+    # FK identifiers should provide supporting evidence,
+    # not beat the table representing the entity itself.
+    FOREIGN_KEY_EXACT_MATCH = 1
+
+    # ======================================================
+    # RETRIEVAL
+    # ======================================================
 
     def retrieve(
         self,
@@ -39,11 +86,16 @@ class KeywordRetriever(BaseSchemaRetriever):
 
         Process:
 
-        1. Tokenize the question.
-        2. Score tables and columns.
-        3. Select the highest-scoring tables.
-        4. Expand only one level through foreign-key relationships.
-        5. Return the selected schema and scores.
+            1. Tokenize and normalize the question.
+            2. Score table names.
+            3. Score physical columns.
+            4. Give FK columns only supporting weight.
+            5. Select high-confidence tables.
+            6. Expand one FK level for relationship context.
+            7. Preserve zero scores for expanded-only tables.
+
+        Expanded tables are useful as schema context but
+        do not count as direct retrieval evidence during RRF.
         """
 
         if not schema:
@@ -59,28 +111,37 @@ class KeywordRetriever(BaseSchemaRetriever):
             )
 
         if top_k is None:
-            top_k = settings.schema_retrieval_top_k
+            top_k = (
+                settings.schema_retrieval_top_k
+            )
 
-        tokens = self._tokenize(question)
+        tokens = self._tokenize(
+            question
+        )
 
         scores = self._score_tables(
             schema=schema,
             tokens=tokens,
         )
 
-        selected_tables = self._select_tables(
-            schema=schema,
-            scores=scores,
-            top_k=top_k,
+        selected_tables = (
+            self._select_tables(
+                scores=scores,
+                top_k=top_k,
+            )
         )
 
         # --------------------------------------------------
-        # Foreign-key expansion
+        # Relationship expansion
         # --------------------------------------------------
 
-        expanded_tables = self._expand_related_tables(
-            schema=schema,
-            selected_tables=set(selected_tables),
+        expanded_tables = (
+            self._expand_related_tables(
+                schema=schema,
+                selected_tables=set(
+                    selected_tables
+                ),
+            )
         )
 
         final_schema = {
@@ -89,10 +150,22 @@ class KeywordRetriever(BaseSchemaRetriever):
             if table_name in schema
         }
 
-        # Directly matched tables retain their score.
-        # FK-expanded tables receive a score of zero.
+        # --------------------------------------------------
+        # Direct matches keep their real score.
+        #
+        # Tables included only through relationship expansion
+        # receive zero so RRF does not interpret them as
+        # independent retrieval evidence.
+        # --------------------------------------------------
+
         final_scores = {
-            table_name: scores.get(table_name, 0)
+            table_name:( scores.get(
+                table_name,
+                0,
+            )
+            if table_name in selected_tables
+            else 0
+            )
             for table_name in final_schema
         }
 
@@ -101,33 +174,115 @@ class KeywordRetriever(BaseSchemaRetriever):
             scores=final_scores,
         )
 
-    # --------------------------------------------------
-    # Tokenization
-    # --------------------------------------------------
+    # ======================================================
+    # TOKENIZATION / NORMALIZATION
+    # ======================================================
 
-    @staticmethod
-    def _tokenize(question: str) -> list[str]:
+    @classmethod
+    def _tokenize(
+        cls,
+        question: str,
+    ) -> list[str]:
         """
         Convert the question into normalized tokens.
 
-        Example:
+        Examples:
 
-            "Show customer names and email addresses"
+            customers  -> customer
+            products   -> product
+            categories -> category
+            prices     -> price
+            ordered    -> order
 
-        becomes approximately:
-
-            ["show", "customer", "names", "and",
-             "email", "addresses"]
+        This deliberately uses lightweight deterministic
+        normalization rather than an NLP dependency.
         """
 
-        return re.findall(
-            r"\w+",
+        raw_tokens = re.findall(
+            r"[a-zA-Z0-9_]+",
             question.lower(),
         )
 
-    # --------------------------------------------------
-    # Scoring
-    # --------------------------------------------------
+        return [
+            cls._normalize_word(token)
+            for token in raw_tokens
+            if token
+        ]
+
+    # ------------------------------------------------------
+
+    @staticmethod
+    def _normalize_word(
+        word: str,
+    ) -> str:
+        """
+        Apply conservative normalization for common English
+        plural and verb forms.
+
+        This is intentionally small and predictable.
+
+        Examples:
+
+            customers  -> customer
+            products   -> product
+            categories -> category
+            ordered    -> order
+        """
+
+        word = word.lower().strip()
+
+        if not word:
+            return word
+
+        # ----------------------------------------------
+        # Plural: categories -> category
+        # ----------------------------------------------
+
+        if (
+            word.endswith("ies")
+            and len(word) > 4
+        ):
+            return (
+                word[:-3]
+                + "y"
+            )
+
+        # ----------------------------------------------
+        # Past tense:
+        # ordered -> order
+        # ----------------------------------------------
+
+        if (
+            word.endswith("ed")
+            and len(word) > 4
+        ):
+            candidate = word[:-2]
+
+            if candidate:
+                return candidate
+
+        # ----------------------------------------------
+        # Basic plural:
+        #
+        # customers -> customer
+        # products  -> product
+        # prices    -> price
+        #
+        # Avoid damaging words ending in "ss".
+        # ----------------------------------------------
+
+        if (
+            word.endswith("s")
+            and not word.endswith("ss")
+            and len(word) > 3
+        ):
+            return word[:-1]
+
+        return word
+
+    # ======================================================
+    # SCORING
+    # ======================================================
 
     def _score_tables(
         self,
@@ -135,154 +290,378 @@ class KeywordRetriever(BaseSchemaRetriever):
         tokens: list[str],
     ) -> dict[str, int]:
         """
-        Calculate relevance scores for every table.
+        Calculate relevance scores for every physical table.
         """
 
         scores: dict[str, int] = {}
 
-        for table_name, table_info in schema.items():
+        for (
+            table_name,
+            table_info,
+        ) in schema.items():
 
             score = 0
 
-            # Table-name matching
+            # ----------------------------------------------
+            # Table-name relevance
+            # ----------------------------------------------
+
             score += self._table_score(
                 table_name=table_name,
                 tokens=tokens,
             )
 
-            # Column-name matching
+            # ----------------------------------------------
+            # Column relevance
+            # ----------------------------------------------
+
             score += self._column_score(
-                columns=table_info.get("columns", []),
+                columns=table_info.get(
+                    "columns",
+                    [],
+                ),
+                foreign_keys=table_info.get(
+                    "foreign_keys",
+                    [],
+                ),
                 tokens=tokens,
             )
 
             if score > 0:
-                scores[table_name] = score
+                scores[
+                    table_name
+                ] = score
 
         return scores
 
-    # --------------------------------------------------
-    # Table Selection
-    # --------------------------------------------------
+    # ======================================================
+    # TABLE SELECTION
+    # ======================================================
 
+    @staticmethod
     def _select_tables(
-        self,
-        schema: dict,
         scores: dict[str, int],
         top_k: int,
-    ) -> set[str]:
+    ) -> list[str]:
         """
-        Select the highest-scoring tables.
+        Select the strongest directly matched tables.
 
-        Only tables meeting the minimum relevance score
-        are selected.
-
-        If no table reaches the minimum score, return an
-        empty set and allow semantic retrieval to contribute
-        in hybrid mode.
+        Tables below the configured minimum score are not
+        considered direct keyword-retrieval candidates.
         """
 
-        min_score = settings.schema_retrieval_min_score
+        min_score = (
+            settings.schema_retrieval_min_score
+        )
 
         filtered_scores = {
             table_name: score
-            for table_name, score in scores.items()
+            for (
+                table_name,
+                score,
+            ) in scores.items()
             if score >= min_score
         }
 
         if not filtered_scores:
-            return set()
+            return []
 
         ranked_tables = sorted(
             filtered_scores.items(),
-            key=lambda item: item[1],
-            reverse=True,
+            key=lambda item: (
+                -item[1],
+                item[0],
+            ),
         )
 
-        return {
+        return [
             table_name
-            for table_name, _ in ranked_tables[:top_k]
-        }
+            for (
+                table_name,
+                _,
+            ) in ranked_tables[
+                :top_k
+            ]
+        ]
 
-    # --------------------------------------------------
-    # Table Scoring
-    # --------------------------------------------------
+    # ======================================================
+    # TABLE SCORING
+    # ======================================================
 
+    @classmethod
     def _table_score(
-        self,
+        cls,
         table_name: str,
         tokens: list[str],
     ) -> int:
         """
-        Score a table based on table-name matches.
+        Score a physical table name.
+
+        Direct entity matches receive the strongest weight.
+
+        Examples:
+
+            customer -> customers
+                strong entity match
+
+            order -> order_items
+                weak component match
+
+            item -> order_items
+                stronger head/entity match
         """
 
         score = 0
 
-        normalized_table_name = table_name.lower()
-
-        # Treat underscores as word separators.
-        table_tokens = set(
-            re.findall(
-                r"\w+",
-                normalized_table_name.replace("_", " "),
-            )
+        raw_table_tokens = re.findall(
+            r"\w+",
+            table_name.lower().replace(
+                "_",
+                " ",
+            ),
         )
+
+        table_tokens = [
+            cls._normalize_word(token)
+            for token in raw_table_tokens
+        ]
+
+        if not table_tokens:
+            return 0
+
+        normalized_question_tokens = set(
+            tokens
+        )
+
+        # --------------------------------------------------
+        # Single-component table.
+        #
+        # customer -> customers
+        # product  -> products
+        # order    -> orders
+        # --------------------------------------------------
+
+        if len(table_tokens) == 1:
+
+            table_entity = table_tokens[0]
+
+            if (
+                table_entity
+                in normalized_question_tokens
+            ):
+                return (
+                    cls.TABLE_ENTITY_MATCH
+                )
+
+            # Weak substring fallback.
+            for token in tokens:
+
+                if (
+                    token
+                    and (
+                        token in table_entity
+                        or table_entity in token
+                    )
+                ):
+                    score += (
+                        cls.TABLE_PARTIAL_MATCH
+                    )
+
+            return score
+
+        # --------------------------------------------------
+        # Compound table.
+        #
+        # Example:
+        #
+        # order_items -> ["order", "item"]
+        # --------------------------------------------------
+
+        # Exact phrase/entity-component coverage.
+        if set(table_tokens).issubset(
+            normalized_question_tokens
+        ):
+            score += (
+                cls.TABLE_ENTITY_MATCH
+            )
+
+        head_token = table_tokens[-1]
 
         for token in tokens:
 
-            if token in table_tokens:
-                score += self.TABLE_EXACT_MATCH
+            if token == head_token:
 
-            elif token in normalized_table_name:
-                score += self.TABLE_PARTIAL_MATCH
+                score += (
+                    cls.TABLE_HEAD_MATCH
+                )
+
+            elif token in table_tokens:
+
+                score += (
+                    cls.TABLE_COMPONENT_MATCH
+                )
+
+            elif any(
+                token
+                and (
+                    token in table_token
+                    or table_token in token
+                )
+                for table_token
+                in table_tokens
+            ):
+
+                score += (
+                    cls.TABLE_PARTIAL_MATCH
+                )
 
         return score
 
-    # --------------------------------------------------
-    # Column Scoring
-    # --------------------------------------------------
+    # ======================================================
+    # COLUMN SCORING
+    # ======================================================
 
+    @classmethod
     def _column_score(
-        self,
+        cls,
         columns: list[dict],
+        foreign_keys: list[dict],
         tokens: list[str],
     ) -> int:
         """
-        Score a table based on column-name matches.
+        Score table columns.
+
+        Foreign-key identifier columns intentionally receive
+        lower scores than normal columns.
+
+        This prevents:
+
+            customer
+
+        from making:
+
+            orders.customer_id
+
+        outrank:
+
+            customers
         """
 
         score = 0
 
+        foreign_key_columns = (
+            cls._foreign_key_columns(
+                foreign_keys
+            )
+        )
+
         for column in columns:
 
-            column_name = column.get("name")
+            column_name = column.get(
+                "name"
+            )
 
             if not column_name:
                 continue
 
-            normalized_column_name = column_name.lower()
+            normalized_column_name = (
+                column_name.lower()
+            )
 
-            column_tokens = set(
-                re.findall(
-                    r"\w+",
-                    normalized_column_name.replace("_", " "),
-                )
+            raw_column_tokens = re.findall(
+                r"\w+",
+                normalized_column_name.replace(
+                    "_",
+                    " ",
+                ),
+            )
+
+            column_tokens = {
+                cls._normalize_word(token)
+                for token in raw_column_tokens
+            }
+
+            is_foreign_key = (
+                column_name
+                in foreign_key_columns
             )
 
             for token in tokens:
 
-                if token in column_tokens:
-                    score += self.COLUMN_EXACT_MATCH
+                # ------------------------------------------
+                # Exact component match
+                # ------------------------------------------
 
-                elif token in normalized_column_name:
-                    score += self.COLUMN_PARTIAL_MATCH
+                if token in column_tokens:
+
+                    if is_foreign_key:
+                        score += (
+                            cls.FOREIGN_KEY_EXACT_MATCH
+                        )
+                    else:
+                        score += (
+                            cls.COLUMN_EXACT_MATCH
+                        )
+
+                    continue
+
+                # ------------------------------------------
+                # Weak substring match
+                #
+                # Do not reward FK substring matches.
+                # ------------------------------------------
+
+                if is_foreign_key:
+                    continue
+
+                if any(
+                    token
+                    and (
+                        token in column_token
+                        or column_token in token
+                    )
+                    for column_token
+                    in column_tokens
+                ):
+                    score += (
+                        cls.COLUMN_PARTIAL_MATCH
+                    )
 
         return score
 
-    # --------------------------------------------------
-    # Foreign-Key Expansion
-    # --------------------------------------------------
+    # ======================================================
+    # FOREIGN-KEY COLUMN EXTRACTION
+    # ======================================================
+
+    @staticmethod
+    def _foreign_key_columns(
+        foreign_keys: list[dict],
+    ) -> set[str]:
+        """
+        Return the local columns participating in foreign keys.
+        """
+
+        columns: set[str] = set()
+
+        for foreign_key in foreign_keys:
+
+            for column_name in (
+                foreign_key.get(
+                    "constrained_columns",
+                    [],
+                )
+            ):
+
+                if column_name:
+                    columns.add(
+                        column_name
+                    )
+
+        return columns
+
+    # ======================================================
+    # FOREIGN-KEY EXPANSION
+    # ======================================================
 
     @staticmethod
     def _expand_related_tables(
@@ -290,25 +669,27 @@ class KeywordRetriever(BaseSchemaRetriever):
         selected_tables: set[str],
     ) -> set[str]:
         """
-        Expand selected tables by one level through
-        foreign-key relationships.
+        Expand directly selected tables by one relationship
+        level.
 
-        Example:
+        Expanded-only tables receive a retrieval score of zero
+        and therefore do not influence Reciprocal Rank Fusion.
 
-            orders -> customers
-
-        If "orders" is selected, "customers" is added.
-
-        If "customers" is selected and orders references
-        customers, "orders" is added.
-
-        Only one FK level is expanded.
+        The coordinator's graph-expansion stage remains
+        responsible for preserving required bridge tables in
+        the final hybrid schema.
         """
 
         if not selected_tables:
             return set()
 
-        expanded = set(selected_tables)
+        expanded = set(
+            selected_tables
+        )
+
+        # --------------------------------------------------
+        # Outgoing relationships
+        # --------------------------------------------------
 
         for table_name in selected_tables:
 
@@ -317,15 +698,17 @@ class KeywordRetriever(BaseSchemaRetriever):
                 {},
             )
 
-            foreign_keys = table_info.get(
-                "foreign_keys",
-                [],
-            )
+            for foreign_key in (
+                table_info.get(
+                    "foreign_keys",
+                    [],
+                )
+            ):
 
-            for foreign_key in foreign_keys:
-
-                referred_table = foreign_key.get(
-                    "referred_table"
+                referred_table = (
+                    foreign_key.get(
+                        "referred_table"
+                    )
                 )
 
                 if (
@@ -336,22 +719,34 @@ class KeywordRetriever(BaseSchemaRetriever):
                         referred_table
                     )
 
-        # Also find tables that reference the selected
-        # tables.
-        for table_name, table_info in schema.items():
+        # --------------------------------------------------
+        # Incoming relationships
+        # --------------------------------------------------
 
-            foreign_keys = table_info.get(
-                "foreign_keys",
-                [],
-            )
+        for (
+            table_name,
+            table_info,
+        ) in schema.items():
 
-            for foreign_key in foreign_keys:
+            for foreign_key in (
+                table_info.get(
+                    "foreign_keys",
+                    [],
+                )
+            ):
 
-                referred_table = foreign_key.get(
-                    "referred_table"
+                referred_table = (
+                    foreign_key.get(
+                        "referred_table"
+                    )
                 )
 
-                if referred_table in selected_tables:
-                    expanded.add(table_name)
+                if (
+                    referred_table
+                    in selected_tables
+                ):
+                    expanded.add(
+                        table_name
+                    )
 
         return expanded

@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-pro"
 
     gemini_embedding_model: str = "gemini-embedding-2"
+    
+    embedding_cache_size: int = 256
 
     # ==================================================
     # Ollama
@@ -69,6 +71,8 @@ class Settings(BaseSettings):
     schema_retrieval_min_score: int = 5
     
     schema_semantic_min_score: float = 0.60
+    
+    schema_semantic_max_score_gap: float = 0.10
 
     # ==================================================
     # Example Retrieval
