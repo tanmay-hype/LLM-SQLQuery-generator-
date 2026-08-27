@@ -1,6 +1,9 @@
 from typing import Callable, Optional
 
+from click import prompt
+from click import prompt
 import httpx
+from openai import providers
 
 from app.core.config import (
     GEMINI_API_KEY,
@@ -9,6 +12,7 @@ from app.core.config import (
     OLLAMA_MODEL,
     OPENAI_API_KEY,
     OPENAI_MODEL,
+    settings,
 )
 
 try:
@@ -40,31 +44,95 @@ class SQLGenerator:
         )
         self.http_client = httpx.Client(timeout=60.0)
 
-    def generate_sql(self, prompt: str) -> str:
-        providers: list[tuple[str, Callable[[str], str]]] = []
+    def generate_sql(
+        self,
+        prompt: str,
+    ) -> str:
+        provider_name = (
+           settings.llm_provider
+           .strip()
+           .lower()
+        )
 
-        if self.gemini_client is not None:
-            providers.append(("gemini", self._generate_with_gemini))
+        providers: list[
+           tuple[
+               str,
+               Callable[[str], str],
+            ]
+        ] = []
 
-        if self.openai_client is not None:
-            providers.append(("openai", self._generate_with_openai))
+        if provider_name == "gemini":
 
-        providers.append(("ollama", self._generate_with_ollama))
+            if self.gemini_client is None:
+               raise RuntimeError(
+                   "Gemini is selected as the LLM provider "
+                   "but GEMINI_API_KEY is not configured."
+                )
+
+            providers.append(
+                (
+                  "gemini",
+                  self._generate_with_gemini,
+                )
+            )
+
+        elif provider_name == "openai":
+
+            if self.openai_client is None:
+                raise RuntimeError(
+                "OpenAI is selected as the LLM provider "
+                "but OPENAI_API_KEY is not configured."
+                )
+
+            providers.append(
+               (
+                  "openai",
+                   self._generate_with_openai,
+                )
+            )
+
+        elif provider_name == "ollama":
+
+            providers.append(
+                (
+                  "ollama",
+                   self._generate_with_ollama,
+                )
+            )
+
+        else:
+
+            raise RuntimeError(
+                "Unsupported LLM provider: "
+                f"{provider_name}"
+            )
 
         last_error: Exception | None = None
 
-        for _provider_name, provider in providers:
+        for current_provider, provider in providers:
+
             try:
-                sql = provider(prompt)
+
+                sql = provider(
+                    prompt
+                )
+
                 if sql:
-                    return self._clean_sql(sql)
+                    return self._clean_sql(
+                    sql
+                    )
+
             except Exception as exc:
+
                 last_error = exc
 
         if last_error is not None:
             raise last_error
 
-        raise RuntimeError("No LLM provider is configured.")
+        raise RuntimeError(
+            "The configured LLM provider "
+            "returned no SQL."
+        )
 
     def _generate_with_gemini(self, prompt: str) -> str:
         if self.gemini_client is None or genai_types is None:
