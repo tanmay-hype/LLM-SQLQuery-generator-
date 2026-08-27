@@ -6,7 +6,7 @@ from app.schema.fusion.rrf import ReciprocalRankFusion
 from app.schema.models.retrieval_result import RetrievalResult
 from app.schema.models.schema_document import SchemaDocument
 from app.schema.retrievers.base import BaseSchemaRetriever
-
+from app.schema.query_expander import RetrievalQueryExpander
 
 class SchemaRetriever:
     """
@@ -39,6 +39,8 @@ class SchemaRetriever:
         self.retrievers = retrievers
 
         self.fusion = ReciprocalRankFusion()
+        
+        self.query_expander = RetrievalQueryExpander()
 
     # ======================================================
     # PUBLIC API
@@ -62,6 +64,8 @@ class SchemaRetriever:
 
         if not question or not question.strip():
             return {}
+        
+        retrieval_question = self.query_expander.expand(question)
 
         # --------------------------------------------------
         # Run individual retrievers
@@ -73,7 +77,7 @@ class SchemaRetriever:
 
             result = retriever.retrieve(
                 schema=schema,
-                question=question,
+                question=retrieval_question,
                 documents=documents,
             )
 
