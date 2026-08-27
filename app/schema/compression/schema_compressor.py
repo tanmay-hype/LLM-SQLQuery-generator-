@@ -62,6 +62,28 @@ class SchemaCompressor:
         "updated_at",
         "name",
     }
+    
+    METRIC_QUESTION_KEYWORDS = {
+        "amount",
+        "total",
+        "spending",
+        "spent",
+        "sales",
+        "revenue",
+        "value",
+        "cost",
+        "price",
+        "money",
+    }
+    
+    QUANTITY_QUESTION_KEYWORDS = {
+        "quantity",
+        "quantities",
+        "units",
+        "items",
+        "number",
+        "count",
+    }
 
     # --------------------------------------------------
     # Public API
@@ -254,12 +276,50 @@ class SchemaCompressor:
 
         if name.endswith("_id"):
             return True
+        
+        
+        # --------------------------------------------------
+        # 5. Question-driven financial metric preserevation
+        # --------------------------------------------------
+
+        financial_metric_requested = bool(
+            tokens
+            & self.METRIC_QUESTION_KEYWORDS
+        )
+        if financial_metric_requested :
+            if self._matches_keywords(
+                name,
+                self.AGGREGATION_COLUMNS,
+            ):
+                return True
+        
+        # --------------------------------------------------
+        # 6. Question-driven quantity metric preserevation
+        # --------------------------------------------------
+
+        quantity_metric_requested = bool(
+            tokens
+            & self.QUANTITY_QUESTION_KEYWORDS
+        )
+        if quantity_metric_requested :
+            if self._matches_keywords(
+                name,
+                {
+                    "quantity",
+                    "count",
+                    "units",
+                },
+            ):
+                return True
 
         # --------------------------------------------------
-        # 5. Aggregation intent
+        # 7. Aggregation intent
         # --------------------------------------------------
 
-        if intent.primary == QueryIntent.AGGREGATION:
+        if self._has_intent(
+            intent,
+            QueryIntent.AGGREGATION,
+        ):
 
             if self._matches_keywords(
                 name,
@@ -268,10 +328,13 @@ class SchemaCompressor:
                 return True
 
         # --------------------------------------------------
-        # 6. Time-series intent
+        # 8. Time-series intent
         # --------------------------------------------------
 
-        if intent.primary == QueryIntent.TIME_SERIES:
+        if self._has_intent(
+            intent,
+            QueryIntent.TIME_SERIES,
+        ):
 
             if self._matches_keywords(
                 name,
@@ -280,10 +343,13 @@ class SchemaCompressor:
                 return True
 
         # --------------------------------------------------
-        # 7. Sorting intent
+        # 9. Sorting intent
         # --------------------------------------------------
 
-        if intent.primary == QueryIntent.SORT:
+        if self._has_intent(
+            intent,
+            QueryIntent.SORT,
+        ):
 
             if self._matches_keywords(
                 name,
@@ -292,10 +358,13 @@ class SchemaCompressor:
                 return True
 
         # --------------------------------------------------
-        # 8. Common semantic columns
+        # 10. Common semantic columns
         # --------------------------------------------------
 
-        if name in self.COMMON_COLUMNS:
+        if self._matches_keywords(
+            name,
+            self.COMMON_COLUMNS,
+        ):
             return True
 
         return False
@@ -320,4 +389,19 @@ class SchemaCompressor:
         return any(
             keyword in column_name
             for keyword in keywords
+        )
+    
+    @staticmethod
+    def _has_intent(
+        intent: IntentAnalysis,
+        target: QueryIntent,
+    ) -> bool:
+        """
+        Check whether the intent analysis indicates
+        a specific query intent.
+        """
+
+        return (
+            intent.primary == target
+            or target in intent.secondary
         )

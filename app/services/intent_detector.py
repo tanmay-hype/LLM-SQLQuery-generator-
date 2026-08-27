@@ -1,5 +1,5 @@
-import re
 import logging
+import re
 
 from app.models.intent import QueryIntent
 from app.models.intent_analysis import IntentAnalysis
@@ -10,18 +10,22 @@ logger = logging.getLogger(__name__)
 
 class IntentDetector:
     """
-    Detects the user's query intent.
+    Detects the user's query intent using deterministic
+    weighted keyword and natural-language pattern scoring.
 
-    The detector uses a lightweight rule-based scoring system.
-    It combines:
+    The detector supports multi-intent questions such as:
 
-    1. Explicit intent keywords
-    2. Natural-language question patterns
-    3. Relationship / join patterns
-    4. Intent priority for tie-breaking
+        "Show total sales by month"
 
-    The detector does not generate SQL.
-    It only describes what the user is trying to do.
+    which may contain:
+
+        TIME_SERIES
+        AGGREGATION
+        GROUP_BY
+        LOOKUP
+
+    The highest-scoring intent becomes primary and all other
+    positive-scoring intents become secondary.
     """
 
     # ======================================================
@@ -34,8 +38,7 @@ class IntentDetector:
         "display": 2,
         "find": 3,
         "get": 1,
-
-        # Natural-language lookup questions
+        "give": 1,
         "which": 3,
         "what": 3,
         "who": 3,
@@ -53,6 +56,14 @@ class IntentDetector:
         "minimum": 5,
         "max": 5,
         "min": 5,
+
+        # Business-metric language
+        "sales": 4,
+        "revenue": 5,
+        "spending": 5,
+        "spent": 4,
+        "amount": 4,
+        "value": 3,
     }
 
     GROUP_BY_KEYWORDS = {
@@ -68,8 +79,11 @@ class IntentDetector:
         "lowest": 5,
         "largest": 4,
         "smallest": 4,
-        
-        #Recency / ordering
+        "greatest": 4,
+        "most": 3,
+        "least": 3,
+
+        # Recency / ordering
         "recent": 5,
         "recently": 5,
         "latest": 5,
@@ -80,14 +94,30 @@ class IntentDetector:
 
     TIME_KEYWORDS = {
         "monthly": 5,
+        "month": 5,
+        "months": 5,
+
         "daily": 4,
+        "day": 4,
+        "days": 4,
+
         "weekly": 4,
+        "week": 4,
+        "weeks": 4,
+
         "yearly": 5,
+        "year": 5,
+        "years": 5,
+
         "trend": 5,
+        "trends": 5,
+        "history": 4,
+        "time": 4,
     }
 
     COMPARISON_KEYWORDS = {
         "compare": 5,
+        "comparison": 5,
         "versus": 5,
         "vs": 5,
     }
@@ -129,6 +159,61 @@ class IntentDetector:
         r"\bbelong(?:s)?\s+to\b",
     )
 
+    TIME_SERIES_PATTERNS = (
+        r"\bby\s+month\b",
+        r"\bper\s+month\b",
+        r"\beach\s+month\b",
+
+        r"\bby\s+day\b",
+        r"\bper\s+day\b",
+        r"\beach\s+day\b",
+
+        r"\bby\s+week\b",
+        r"\bper\s+week\b",
+        r"\beach\s+week\b",
+
+        r"\bby\s+year\b",
+        r"\bper\s+year\b",
+        r"\beach\s+year\b",
+
+        r"\bover\s+time\b",
+        r"\bover\s+the\s+time\b",
+        r"\bthrough\s+time\b",
+        r"\bpurchase\s+history\b",
+        r"\border\s+history\b",
+        r"\bsales\s+trend(?:s)?\b",
+    )
+
+    GROUP_BY_PATTERNS = (
+        r"\bby\s+month\b",
+        r"\bby\s+day\b",
+        r"\bby\s+week\b",
+        r"\bby\s+year\b",
+        r"\bper\s+\w+\b",
+        r"\bfor\s+each\s+\w+\b",
+    )
+
+    AGGREGATION_PATTERNS = (
+        r"\btotal\s+\w+",
+        r"\bsales\s+(?:amount|value|activity)\b",
+        r"\brevenue\b",
+        r"\bspending\b",
+        r"\bspent\b",
+        r"\bpurchase\s+value\b",
+        r"\btransaction\s+value\b",
+        r"\bnumber\s+of\b",
+    )
+
+    SORT_PATTERNS = (
+        r"\bmost\s+recent\b",
+        r"\bspent\s+the\s+most\b",
+        r"\bhighest\s+\w+",
+        r"\blargest\s+\w+",
+        r"\bgreatest\s+\w+",
+        r"\bsmallest\s+\w+",
+        r"\blowest\s+\w+",
+    )
+
     # ======================================================
     # INTENT PRIORITY
     # ======================================================
@@ -148,7 +233,10 @@ class IntentDetector:
     # TOKENIZATION
     # ======================================================
 
-    def _tokenize(self, question: str) -> set[str]:
+    @staticmethod
+    def _tokenize(
+        question: str,
+    ) -> set[str]:
         """
         Convert the question into normalized tokens.
         """
@@ -169,28 +257,23 @@ class IntentDetector:
         question: str,
     ) -> IntentAnalysis:
         """
-        Detect the primary and secondary intents.
+        Detect primary and secondary query intents.
         """
 
         if not question or not question.strip():
+
             return IntentAnalysis(
                 primary=QueryIntent.UNKNOWN,
                 secondary=[],
-                scores={
-                    QueryIntent.LOOKUP: 0,
-                    QueryIntent.AGGREGATION: 0,
-                    QueryIntent.GROUP_BY: 0,
-                    QueryIntent.SORT: 0,
-                    QueryIntent.TIME_SERIES: 0,
-                    QueryIntent.COMPARISON: 0,
-                    QueryIntent.JOIN: 0,
-                },
+                scores=self._empty_scores(),
                 confidence=0.0,
             )
 
         question = question.strip()
 
-        tokens = self._tokenize(question)
+        tokens = self._tokenize(
+            question
+        )
 
         scores = self._score_intents(
             tokens=tokens,
@@ -202,15 +285,17 @@ class IntentDetector:
             scores,
         )
 
-        primary = self._best_intent(scores)
-
-        confidence = self._confidence(
+        primary = self._best_intent(
             scores
         )
 
         secondary = self._secondary_intents(
             scores=scores,
             primary=primary,
+        )
+
+        confidence = self._confidence(
+            scores
         )
 
         logger.debug(
@@ -240,67 +325,131 @@ class IntentDetector:
         question: str,
     ) -> dict[QueryIntent, int]:
         """
-        Calculate scores for every supported intent.
+        Calculate weighted scores for all supported intents.
         """
 
-        scores = {
-            QueryIntent.LOOKUP: self._count_matches(
-                tokens,
-                self.LOOKUP_KEYWORDS,
-            ),
+        scores = self._empty_scores()
 
-            QueryIntent.AGGREGATION: self._count_matches(
-                tokens,
-                self.AGGREGATION_KEYWORDS,
-            ),
+        scores[
+            QueryIntent.LOOKUP
+        ] += self._count_matches(
+            tokens,
+            self.LOOKUP_KEYWORDS,
+        )
 
-            QueryIntent.GROUP_BY: self._count_matches(
-                tokens,
-                self.GROUP_BY_KEYWORDS,
-            ),
+        scores[
+            QueryIntent.AGGREGATION
+        ] += self._count_matches(
+            tokens,
+            self.AGGREGATION_KEYWORDS,
+        )
 
-            QueryIntent.SORT: self._count_matches(
-                tokens,
-                self.SORT_KEYWORDS,
-            ),
+        scores[
+            QueryIntent.GROUP_BY
+        ] += self._count_matches(
+            tokens,
+            self.GROUP_BY_KEYWORDS,
+        )
 
-            QueryIntent.TIME_SERIES: self._count_matches(
-                tokens,
-                self.TIME_KEYWORDS,
-            ),
+        scores[
+            QueryIntent.SORT
+        ] += self._count_matches(
+            tokens,
+            self.SORT_KEYWORDS,
+        )
 
-            QueryIntent.COMPARISON: self._count_matches(
-                tokens,
-                self.COMPARISON_KEYWORDS,
-            ),
+        scores[
+            QueryIntent.TIME_SERIES
+        ] += self._count_matches(
+            tokens,
+            self.TIME_KEYWORDS,
+        )
 
-            QueryIntent.JOIN: self._count_matches(
-                tokens,
-                self.JOIN_KEYWORDS,
-            ),
-        }
+        scores[
+            QueryIntent.COMPARISON
+        ] += self._count_matches(
+            tokens,
+            self.COMPARISON_KEYWORDS,
+        )
+
+        scores[
+            QueryIntent.JOIN
+        ] += self._count_matches(
+            tokens,
+            self.JOIN_KEYWORDS,
+        )
 
         # --------------------------------------------------
-        # Natural-language lookup patterns
+        # Pattern bonuses
         # --------------------------------------------------
 
         if self._matches_any_pattern(
             question,
             self.LOOKUP_PATTERNS,
         ):
-            scores[QueryIntent.LOOKUP] += 3
-
-        # --------------------------------------------------
-        # Relationship / JOIN patterns
-        # --------------------------------------------------
+            scores[
+                QueryIntent.LOOKUP
+            ] += 3
 
         if self._matches_any_pattern(
             question,
             self.JOIN_PATTERNS,
         ):
-            scores[QueryIntent.JOIN] += 4
+            scores[
+                QueryIntent.JOIN
+            ] += 4
+
+        if self._matches_any_pattern(
+            question,
+            self.TIME_SERIES_PATTERNS,
+        ):
+            scores[
+                QueryIntent.TIME_SERIES
+            ] += 5
+
+        if self._matches_any_pattern(
+            question,
+            self.GROUP_BY_PATTERNS,
+        ):
+            scores[
+                QueryIntent.GROUP_BY
+            ] += 3
+
+        if self._matches_any_pattern(
+            question,
+            self.AGGREGATION_PATTERNS,
+        ):
+            scores[
+                QueryIntent.AGGREGATION
+            ] += 4
+
+        if self._matches_any_pattern(
+            question,
+            self.SORT_PATTERNS,
+        ):
+            scores[
+                QueryIntent.SORT
+            ] += 4
 
         return scores
+
+    # ======================================================
+    # EMPTY SCORE MAP
+    # ======================================================
+
+    @staticmethod
+    def _empty_scores(
+    ) -> dict[QueryIntent, int]:
+
+        return {
+            QueryIntent.LOOKUP: 0,
+            QueryIntent.AGGREGATION: 0,
+            QueryIntent.GROUP_BY: 0,
+            QueryIntent.SORT: 0,
+            QueryIntent.TIME_SERIES: 0,
+            QueryIntent.COMPARISON: 0,
+            QueryIntent.JOIN: 0,
+        }
 
     # ======================================================
     # KEYWORD MATCHING
@@ -312,18 +461,16 @@ class IntentDetector:
         keywords: dict[str, int],
     ) -> int:
         """
-        Calculate weighted keyword score.
+        Calculate a weighted keyword score.
         """
 
-        score = 0
-
-        for token in tokens:
-            score += keywords.get(
+        return sum(
+            keywords.get(
                 token,
                 0,
             )
-
-        return score
+            for token in tokens
+        )
 
     # ======================================================
     # PATTERN MATCHING
@@ -335,7 +482,7 @@ class IntentDetector:
         patterns: tuple[str, ...],
     ) -> bool:
         """
-        Return True when at least one regex pattern
+        Return True if one of the supplied regex patterns
         matches the question.
         """
 
@@ -363,42 +510,47 @@ class IntentDetector:
         """
 
         max_score = max(
-            scores.values()
+            scores.values(),
+            default=0,
         )
 
-        if max_score == 0:
+        if max_score <= 0:
             return QueryIntent.UNKNOWN
 
         candidates = [
             intent
-            for intent, score in scores.items()
+            for intent, score
+            in scores.items()
             if score == max_score
         ]
 
         return max(
             candidates,
-            key=lambda intent: self.INTENT_PRIORITY[intent],
+            key=lambda intent: (
+                self.INTENT_PRIORITY.get(
+                    intent,
+                    0,
+                )
+            ),
         )
 
     # ======================================================
     # CONFIDENCE
     # ======================================================
 
+    @staticmethod
     def _confidence(
-        self,
         scores: dict[QueryIntent, int],
     ) -> float:
         """
-        Calculate confidence as:
-
-            best score / total score
+        Calculate relative primary-intent confidence.
         """
 
         total = sum(
             scores.values()
         )
 
-        if total == 0:
+        if total <= 0:
             return 0.0
 
         best = max(
@@ -420,32 +572,28 @@ class IntentDetector:
         primary: QueryIntent,
     ) -> list[QueryIntent]:
         """
-        Return all non-primary intents
-        with a score greater than zero.
-
-        Results are sorted by:
-
-        1. Score
-        2. Intent priority
+        Return all positively scored non-primary intents,
+        sorted by relevance and tie-breaking priority.
         """
 
-        secondary = []
-
-        for intent, score in scores.items():
-
-            if intent == primary:
-                continue
-
-            if score > 0:
-                secondary.append(
-                    intent
-                )
+        secondary = [
+            intent
+            for intent, score
+            in scores.items()
+            if (
+                intent != primary
+                and score > 0
+            )
+        ]
 
         return sorted(
             secondary,
             key=lambda intent: (
                 scores[intent],
-                self.INTENT_PRIORITY[intent],
+                self.INTENT_PRIORITY.get(
+                    intent,
+                    0,
+                ),
             ),
             reverse=True,
         )
