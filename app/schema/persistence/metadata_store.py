@@ -1,19 +1,35 @@
 import json
 from pathlib import Path
 
-from app.schema.models.schema_document import SchemaDocument
+from app.schema.indexing.schema_fingerprint import (
+    SchemaFingerprint,
+)
+from app.schema.models.schema_document import (
+    SchemaDocument,
+)
 
 
 class MetadataStore:
     """
     Persists SchemaDocument metadata alongside the FAISS index.
+
+    The persisted schema documents are also used to determine
+    whether the FAISS index still matches the current database
+    schema.
     """
+
+    # ======================================================
+    # SAVE
+    # ======================================================
 
     def save(
         self,
         path: str,
         documents: list[SchemaDocument],
     ) -> None:
+        """
+        Persist schema documents as JSON metadata.
+        """
 
         payload = []
 
@@ -28,23 +44,45 @@ class MetadataStore:
                 }
             )
 
-        Path(path).write_text(
-            json.dumps(payload, indent=4),
+        metadata_path = Path(path)
+
+        metadata_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        metadata_path.write_text(
+            json.dumps(
+                payload,
+                indent=4,
+                default=str,
+            ),
             encoding="utf-8",
         )
+
+    # ======================================================
+    # LOAD
+    # ======================================================
 
     def load(
         self,
         path: str,
     ) -> list[SchemaDocument]:
+        """
+        Load persisted schema documents.
+        """
+
+        metadata_path = Path(path)
 
         raw = json.loads(
-            Path(path).read_text(
+            metadata_path.read_text(
                 encoding="utf-8"
             )
         )
 
-        documents = []
+        documents: list[
+            SchemaDocument
+        ] = []
 
         for item in raw:
 
@@ -53,15 +91,52 @@ class MetadataStore:
                     id=item["id"],
                     table_name=item["table_name"],
                     content=item["content"],
-                    metadata=item.get("metadata", {}),
+                    metadata=item.get(
+                        "metadata",
+                        {},
+                    ),
                 )
             )
 
         return documents
 
-    def exists(
+    # ======================================================
+    # FINGERPRINT
+    # ======================================================
+
+    def fingerprint(
         self,
         path: str,
+    ) -> str:
+        """
+        Calculate the fingerprint of the persisted schema
+        documents.
+
+        This allows SchemaIndexService to determine whether
+        an existing FAISS index is stale.
+        """
+
+        if not self.exists(path):
+            return ""
+
+        documents = self.load(
+            path
+        )
+
+        return SchemaFingerprint.create(
+            documents
+        )
+
+    # ======================================================
+    # EXISTS
+    # ======================================================
+
+    @staticmethod
+    def exists(
+        path: str,
     ) -> bool:
+        """
+        Return True when the metadata file exists.
+        """
 
         return Path(path).exists()
