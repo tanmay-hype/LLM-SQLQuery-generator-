@@ -1,3 +1,6 @@
+import argparse
+import re
+
 from sqlglot import exp, parse_one
 
 from app.services.query_service import QueryService
@@ -132,6 +135,24 @@ TEST_CASES = [
             "AVG",
         },
     },
+
+    # ------------------------------------------------------
+    # IMPORTANT:
+    #
+    # Both of these are semantically valid:
+    #
+    #   SELECT MAX(price) FROM products;
+    #
+    # and:
+    #
+    #   SELECT price
+    #   FROM products
+    #   ORDER BY price DESC
+    #   LIMIT 1;
+    #
+    # Therefore this case accepts either implementation.
+    # ------------------------------------------------------
+
     {
         "question": "What is the highest product price?",
         "required_tables": {
@@ -140,9 +161,19 @@ TEST_CASES = [
         "required_columns": {
             "price",
         },
-        "required_aggregates": {
-            "MAX",
-        },
+        "semantic_alternatives": [
+            {
+                "required_aggregates": {
+                    "MAX",
+                },
+            },
+            {
+                "requires_order_by": True,
+                "order_direction": "DESC",
+                "requires_limit": True,
+                "expected_limit": 1,
+            },
+        ],
     },
 
     # ------------------------------------------------------
@@ -407,7 +438,7 @@ TEST_CASES = [
     },
 
     # ------------------------------------------------------
-    # IMPOSSIBLE / HALLUCINATION TESTS
+    # IMPOSSIBLE / HALLUCINATION
     # ------------------------------------------------------
 
     {
@@ -635,6 +666,7 @@ def get_order_direction(
         first,
         exp.Ordered,
     ):
+
         return (
             "DESC"
             if first.args.get(
@@ -653,8 +685,6 @@ def get_order_direction(
 def extract_date_granularities(
     statement,
 ) -> set[str]:
-
-    import re
 
     sql_text = statement.sql(
         dialect="postgres"
@@ -702,6 +732,152 @@ def is_insufficient_query(
 
 
 # ==========================================================
+# SEMANTIC ALTERNATIVE EVALUATION
+# ==========================================================
+
+def evaluate_semantic_alternative(
+    statement,
+    alternative: dict,
+) -> list[str]:
+    """
+    Evaluate one acceptable implementation of a semantic
+    requirement.
+
+    Example:
+
+        "highest product price"
+
+    may be implemented as either:
+
+        MAX(price)
+
+    or:
+
+        ORDER BY price DESC
+        LIMIT 1
+    """
+
+    errors: list[str] = []
+
+    aggregates = extract_aggregates(
+        statement
+    )
+
+    # ------------------------------------------------------
+    # Aggregate
+    # ------------------------------------------------------
+
+    required_aggregates = set(
+        alternative.get(
+            "required_aggregates",
+            set(),
+        )
+    )
+
+    missing_aggregates = (
+        required_aggregates
+        - aggregates
+    )
+
+    if missing_aggregates:
+
+        errors.append(
+            "Missing aggregate(s): "
+            + ", ".join(
+                sorted(
+                    missing_aggregates
+                )
+            )
+        )
+
+    # ------------------------------------------------------
+    # ORDER BY
+    # ------------------------------------------------------
+
+    if (
+        alternative.get(
+            "requires_order_by"
+        )
+        and not has_order_by(
+            statement
+        )
+    ):
+
+        errors.append(
+            "ORDER BY is required."
+        )
+
+    expected_direction = (
+        alternative.get(
+            "order_direction"
+        )
+    )
+
+    if expected_direction:
+
+        actual_direction = (
+            get_order_direction(
+                statement
+            )
+        )
+
+        if (
+            actual_direction
+            != expected_direction
+        ):
+
+            errors.append(
+                "Incorrect ORDER BY direction. "
+                f"Expected {expected_direction}, "
+                f"got {actual_direction}."
+            )
+
+    # ------------------------------------------------------
+    # LIMIT
+    # ------------------------------------------------------
+
+    if (
+        alternative.get(
+            "requires_limit"
+        )
+        and not has_limit(
+            statement
+        )
+    ):
+
+        errors.append(
+            "LIMIT/FETCH is required."
+        )
+
+    expected_limit = (
+        alternative.get(
+            "expected_limit"
+        )
+    )
+
+    if expected_limit is not None:
+
+        actual_limit = (
+            get_limit_value(
+                statement
+            )
+        )
+
+        if (
+            actual_limit
+            != expected_limit
+        ):
+
+            errors.append(
+                "Incorrect LIMIT. "
+                f"Expected {expected_limit}, "
+                f"got {actual_limit}."
+            )
+
+    return errors
+
+
+# ==========================================================
 # EVALUATION
 # ==========================================================
 
@@ -723,6 +899,7 @@ def evaluate_case(
         if not is_insufficient_query(
             sql
         ):
+
             errors.append(
                 "Expected insufficient-information response."
             )
@@ -1004,6 +1181,52 @@ def evaluate_case(
                 f"Expected {required_granularity}."
             )
 
+    # ------------------------------------------------------
+    # Semantic alternatives
+    # ------------------------------------------------------
+
+    alternatives = (
+        expectations.get(
+            "semantic_alternatives",
+            [],
+        )
+    )
+
+    if alternatives:
+
+        alternative_results = [
+            evaluate_semantic_alternative(
+                statement=statement,
+                alternative=alternative,
+            )
+            for alternative in alternatives
+        ]
+
+        alternative_passed = any(
+            not alternative_errors
+            for alternative_errors
+            in alternative_results
+        )
+
+        if not alternative_passed:
+
+            errors.append(
+                "None of the accepted semantic "
+                "alternatives matched."
+            )
+
+            for index, alternative_errors in enumerate(
+                alternative_results,
+                start=1,
+            ):
+
+                errors.append(
+                    f"Alternative {index}: "
+                    + "; ".join(
+                        alternative_errors
+                    )
+                )
+
     return (
         not errors,
         errors,
@@ -1011,10 +1234,303 @@ def evaluate_case(
 
 
 # ==========================================================
-# MAIN
+# TEST SELECTION
+# ==========================================================
+
+def parse_test_numbers(
+    value: str,
+) -> list[int]:
+    """
+    Parse:
+
+        --tests 2,4,8,12
+
+    into:
+
+        [2, 4, 8, 12]
+    """
+
+    values: list[int] = []
+
+    for item in value.split(","):
+
+        item = item.strip()
+
+        if not item:
+            continue
+
+        try:
+            number = int(
+                item
+            )
+        except ValueError as exc:
+
+            raise argparse.ArgumentTypeError(
+                f"Invalid test number: {item}"
+            ) from exc
+
+        values.append(
+            number
+        )
+
+    if not values:
+
+        raise argparse.ArgumentTypeError(
+            "At least one test number is required."
+        )
+
+    return values
+
+
+def get_selected_tests(
+    single_test: int | None,
+    multiple_tests: list[int] | None,
+    run_all: bool,
+) -> list[tuple[int, dict]]:
+    """
+    Return selected benchmark cases.
+
+    IMPORTANT:
+
+    Without --all, --test, or --tests, no expensive
+    benchmark is executed accidentally.
+    """
+
+    total = len(
+        TEST_CASES
+    )
+
+    if run_all:
+
+        return list(
+            enumerate(
+                TEST_CASES,
+                start=1,
+            )
+        )
+
+    requested: list[int] = []
+
+    if single_test is not None:
+        requested.append(
+            single_test
+        )
+
+    if multiple_tests:
+        requested.extend(
+            multiple_tests
+        )
+
+    # Remove duplicates while preserving order.
+    requested = list(
+        dict.fromkeys(
+            requested
+        )
+    )
+
+    if not requested:
+
+        return []
+
+    invalid = [
+        number
+        for number in requested
+        if (
+            number < 1
+            or number > total
+        )
+    ]
+
+    if invalid:
+
+        raise ValueError(
+            "Invalid test number(s): "
+            + ", ".join(
+                str(number)
+                for number in invalid
+            )
+            + f". Valid range is 1-{total}."
+        )
+
+    return [
+        (
+            number,
+            TEST_CASES[
+                number - 1
+            ],
+        )
+        for number in requested
+    ]
+
+
+# ==========================================================
+# LIST TESTS
+# ==========================================================
+
+def list_tests() -> None:
+
+    print("=" * 80)
+    print(
+        "AVAILABLE GENERALIZATION TESTS"
+    )
+    print("=" * 80)
+
+    for index, test in enumerate(
+        TEST_CASES,
+        start=1,
+    ):
+
+        print(
+            f"{index:>2}: "
+            f"{test['question']}"
+        )
+
+    print("=" * 80)
+
+
+# ==========================================================
+# ARGUMENT PARSER
+# ==========================================================
+
+def build_argument_parser(
+) -> argparse.ArgumentParser:
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run SQL generalization benchmark tests "
+            "without unnecessarily invoking the LLM "
+            "for every benchmark case."
+        )
+    )
+
+    parser.add_argument(
+        "--test",
+        type=int,
+        help=(
+            "Run one test only. "
+            "Example: --test 12"
+        ),
+    )
+
+    parser.add_argument(
+        "--tests",
+        type=parse_test_numbers,
+        help=(
+            "Run selected tests. "
+            "Example: --tests 2,4,8,12"
+        ),
+    )
+
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help=(
+            "Run the complete benchmark. "
+            "This may cause many LLM API calls."
+        ),
+    )
+
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help=(
+            "List available tests without "
+            "calling the LLM."
+        ),
+    )
+
+    return parser
+
+
+# ==========================================================
+# MAIN BENCHMARK
 # ==========================================================
 
 def main():
+
+    parser = (
+        build_argument_parser()
+    )
+
+    args = parser.parse_args()
+
+    # ------------------------------------------------------
+    # List mode
+    #
+    # Costs zero LLM calls.
+    # ------------------------------------------------------
+
+    if args.list:
+
+        list_tests()
+
+        return
+
+    # ------------------------------------------------------
+    # Select tests
+    # ------------------------------------------------------
+
+    try:
+
+        selected_tests = (
+            get_selected_tests(
+                single_test=args.test,
+                multiple_tests=args.tests,
+                run_all=args.all,
+            )
+        )
+
+    except ValueError as exc:
+
+        parser.error(
+            str(exc)
+        )
+
+        return
+
+    # ------------------------------------------------------
+    # Protect against accidental expensive runs.
+    # ------------------------------------------------------
+
+    if not selected_tests:
+
+        print("=" * 80)
+        print(
+            "NO TESTS EXECUTED"
+        )
+        print("=" * 80)
+
+        print(
+            "Choose one of:"
+        )
+
+        print()
+        print(
+            "  --test 12"
+        )
+
+        print(
+            "  --tests 2,4,8,12"
+        )
+
+        print(
+            "  --all"
+        )
+
+        print(
+            "  --list"
+        )
+
+        print()
+        print(
+            "The full benchmark is not run "
+            "automatically to avoid unnecessary "
+            "LLM API charges."
+        )
+
+        print("=" * 80)
+
+        return
 
     print("=" * 80)
     print(
@@ -1022,26 +1538,57 @@ def main():
     )
     print("=" * 80)
 
+    print(
+        "SELECTED TESTS:",
+        [
+            number
+            for number, _
+            in selected_tests
+        ],
+    )
+
+    print(
+        "TEST COUNT:",
+        len(
+            selected_tests
+        ),
+    )
+
+    print("=" * 80)
+
+    # ------------------------------------------------------
+    # QueryService is only initialized when we're
+    # actually going to execute benchmark cases.
+    # ------------------------------------------------------
+
     service = QueryService()
 
     passed = 0
+
     failed = 0
+
     errors_count = 0
 
-    for index, test in enumerate(
-        TEST_CASES,
-        start=1,
-    ):
+    # ======================================================
+    # RUN TESTS
+    # ======================================================
+
+    for (
+        test_number,
+        test,
+    ) in selected_tests:
 
         question = (
-            test["question"]
+            test[
+                "question"
+            ]
         )
 
         print()
         print("=" * 80)
 
         print(
-            f"TEST {index}: "
+            f"TEST {test_number}: "
             f"{question}"
         )
 
@@ -1049,15 +1596,24 @@ def main():
 
         try:
 
+            # ----------------------------------------------
+            # Full production pipeline.
+            #
+            # This is the expensive part because the
+            # configured LLM may be called.
+            # ----------------------------------------------
+
             response = (
                 service.generate_sql(
                     question
                 )
             )
 
-            sql = response.sql
+            sql = (
+                response.sql
+            )
 
-            valid, errors = (
+            valid, evaluation_errors = (
                 evaluate_case(
                     sql=sql,
                     expectations=test,
@@ -1091,7 +1647,9 @@ def main():
                     "STATUS: FAIL"
                 )
 
-                for error in errors:
+                for error in (
+                    evaluation_errors
+                ):
 
                     print(
                         "ERROR:",
@@ -1119,8 +1677,12 @@ def main():
                 str(exc),
             )
 
+    # ======================================================
+    # SUMMARY
+    # ======================================================
+
     total = len(
-        TEST_CASES
+        selected_tests
     )
 
     evaluated = (
@@ -1138,7 +1700,7 @@ def main():
         else 0.0
     )
 
-    execution_success = (
+    evaluation_completion = (
         (
             evaluated
             / total
@@ -1170,7 +1732,7 @@ def main():
     )
 
     print(
-        f"TOTAL:  {total}"
+        f"TOTAL EXECUTED: {total}"
     )
 
     print(
@@ -1180,7 +1742,7 @@ def main():
 
     print(
         "EVALUATION COMPLETION: "
-        f"{execution_success:.2f}%"
+        f"{evaluation_completion:.2f}%"
     )
 
     print("=" * 80)
