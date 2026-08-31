@@ -1,5 +1,7 @@
 import argparse
+import json
 import re
+from pathlib import Path
 
 from sqlglot import exp, parse_one
 
@@ -135,24 +137,6 @@ TEST_CASES = [
             "AVG",
         },
     },
-
-    # ------------------------------------------------------
-    # IMPORTANT:
-    #
-    # Both of these are semantically valid:
-    #
-    #   SELECT MAX(price) FROM products;
-    #
-    # and:
-    #
-    #   SELECT price
-    #   FROM products
-    #   ORDER BY price DESC
-    #   LIMIT 1;
-    #
-    # Therefore this case accepts either implementation.
-    # ------------------------------------------------------
-
     {
         "question": "What is the highest product price?",
         "required_tables": {
@@ -438,7 +422,7 @@ TEST_CASES = [
     },
 
     # ------------------------------------------------------
-    # IMPOSSIBLE / HALLUCINATION
+    # IMPOSSIBLE / HALLUCINATION TESTS
     # ------------------------------------------------------
 
     {
@@ -454,6 +438,145 @@ TEST_CASES = [
         "expected_insufficient": True,
     },
 ]
+
+
+# ==========================================================
+# BENCHMARK SQL CACHE
+# ==========================================================
+
+CACHE_PATH = Path(
+    "tests/benchmark_cache/sql_generalization.json"
+)
+
+
+def load_benchmark_cache() -> dict:
+    """
+    Load previously generated SQL from disk.
+
+    Cache format:
+
+        {
+            "12": {
+                "question": "What is the highest product price?",
+                "sql": "SELECT ..."
+            }
+        }
+
+    If the cache does not exist or cannot be decoded,
+    an empty cache is returned.
+    """
+
+    if not CACHE_PATH.exists():
+        return {}
+
+    try:
+        payload = json.loads(
+            CACHE_PATH.read_text(
+                encoding="utf-8"
+            )
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ):
+        return {}
+
+    if not isinstance(
+        payload,
+        dict,
+    ):
+        return {}
+
+    return payload
+
+
+def save_benchmark_cache(
+    cache: dict,
+) -> None:
+    """
+    Persist benchmark-generated SQL.
+
+    The cache is intentionally test-only. It does not affect
+    the production QueryService SQL-generation pipeline.
+    """
+
+    CACHE_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    CACHE_PATH.write_text(
+        json.dumps(
+            cache,
+            indent=4,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def get_cached_sql(
+    cache: dict,
+    test_number: int,
+    question: str,
+) -> str | None:
+    """
+    Return cached SQL only when the cached question exactly
+    matches the current benchmark question.
+
+    This prevents stale SQL from being evaluated if a test
+    question is later changed.
+    """
+
+    entry = cache.get(
+        str(test_number)
+    )
+
+    if not isinstance(
+        entry,
+        dict,
+    ):
+        return None
+
+    if entry.get(
+        "question"
+    ) != question:
+        return None
+
+    sql = entry.get(
+        "sql"
+    )
+
+    if not isinstance(
+        sql,
+        str,
+    ):
+        return None
+
+    sql = sql.strip()
+
+    if not sql:
+        return None
+
+    return sql
+
+
+def store_cached_sql(
+    cache: dict,
+    test_number: int,
+    question: str,
+    sql: str,
+) -> None:
+    """
+    Store successfully generated SQL for one benchmark case.
+    """
+
+    cache[
+        str(test_number)
+    ] = {
+        "question": question,
+        "sql": sql,
+    }
 
 
 # ==========================================================
@@ -666,7 +789,6 @@ def get_order_direction(
         first,
         exp.Ordered,
     ):
-
         return (
             "DESC"
             if first.args.get(
@@ -740,21 +862,23 @@ def evaluate_semantic_alternative(
     alternative: dict,
 ) -> list[str]:
     """
-    Evaluate one acceptable implementation of a semantic
-    requirement.
+    Evaluate one acceptable SQL implementation.
+
+    This allows the benchmark to accept semantically
+    equivalent SQL forms.
 
     Example:
 
-        "highest product price"
+        SELECT MAX(price) FROM products;
 
-    may be implemented as either:
+    and:
 
-        MAX(price)
-
-    or:
-
+        SELECT price
+        FROM products
         ORDER BY price DESC
-        LIMIT 1
+        LIMIT 1;
+
+    both correctly answer "What is the highest product price?"
     """
 
     errors: list[str] = []
@@ -762,10 +886,6 @@ def evaluate_semantic_alternative(
     aggregates = extract_aggregates(
         statement
     )
-
-    # ------------------------------------------------------
-    # Aggregate
-    # ------------------------------------------------------
 
     required_aggregates = set(
         alternative.get(
@@ -780,7 +900,6 @@ def evaluate_semantic_alternative(
     )
 
     if missing_aggregates:
-
         errors.append(
             "Missing aggregate(s): "
             + ", ".join(
@@ -790,10 +909,6 @@ def evaluate_semantic_alternative(
             )
         )
 
-    # ------------------------------------------------------
-    # ORDER BY
-    # ------------------------------------------------------
-
     if (
         alternative.get(
             "requires_order_by"
@@ -802,7 +917,6 @@ def evaluate_semantic_alternative(
             statement
         )
     ):
-
         errors.append(
             "ORDER BY is required."
         )
@@ -814,7 +928,6 @@ def evaluate_semantic_alternative(
     )
 
     if expected_direction:
-
         actual_direction = (
             get_order_direction(
                 statement
@@ -825,16 +938,11 @@ def evaluate_semantic_alternative(
             actual_direction
             != expected_direction
         ):
-
             errors.append(
                 "Incorrect ORDER BY direction. "
                 f"Expected {expected_direction}, "
                 f"got {actual_direction}."
             )
-
-    # ------------------------------------------------------
-    # LIMIT
-    # ------------------------------------------------------
 
     if (
         alternative.get(
@@ -844,7 +952,6 @@ def evaluate_semantic_alternative(
             statement
         )
     ):
-
         errors.append(
             "LIMIT/FETCH is required."
         )
@@ -856,7 +963,6 @@ def evaluate_semantic_alternative(
     )
 
     if expected_limit is not None:
-
         actual_limit = (
             get_limit_value(
                 statement
@@ -867,7 +973,6 @@ def evaluate_semantic_alternative(
             actual_limit
             != expected_limit
         ):
-
             errors.append(
                 "Incorrect LIMIT. "
                 f"Expected {expected_limit}, "
@@ -899,7 +1004,6 @@ def evaluate_case(
         if not is_insufficient_query(
             sql
         ):
-
             errors.append(
                 "Expected insufficient-information response."
             )
@@ -1185,15 +1289,12 @@ def evaluate_case(
     # Semantic alternatives
     # ------------------------------------------------------
 
-    alternatives = (
-        expectations.get(
-            "semantic_alternatives",
-            [],
-        )
+    alternatives = expectations.get(
+        "semantic_alternatives",
+        [],
     )
 
     if alternatives:
-
         alternative_results = [
             evaluate_semantic_alternative(
                 statement=statement,
@@ -1202,26 +1303,24 @@ def evaluate_case(
             for alternative in alternatives
         ]
 
-        alternative_passed = any(
+        if not any(
             not alternative_errors
-            for alternative_errors
-            in alternative_results
-        )
-
-        if not alternative_passed:
-
+            for alternative_errors in alternative_results
+        ):
             errors.append(
                 "None of the accepted semantic "
                 "alternatives matched."
             )
 
-            for index, alternative_errors in enumerate(
+            for (
+                alternative_index,
+                alternative_errors,
+            ) in enumerate(
                 alternative_results,
                 start=1,
             ):
-
                 errors.append(
-                    f"Alternative {index}: "
+                    f"Alternative {alternative_index}: "
                     + "; ".join(
                         alternative_errors
                     )
@@ -1241,11 +1340,13 @@ def parse_test_numbers(
     value: str,
 ) -> list[int]:
     """
-    Parse:
+    Parse a comma-separated test list.
+
+    Example:
 
         --tests 2,4,8,12
 
-    into:
+    becomes:
 
         [2, 4, 8, 12]
     """
@@ -1253,7 +1354,6 @@ def parse_test_numbers(
     values: list[int] = []
 
     for item in value.split(","):
-
         item = item.strip()
 
         if not item:
@@ -1264,7 +1364,6 @@ def parse_test_numbers(
                 item
             )
         except ValueError as exc:
-
             raise argparse.ArgumentTypeError(
                 f"Invalid test number: {item}"
             ) from exc
@@ -1274,7 +1373,6 @@ def parse_test_numbers(
         )
 
     if not values:
-
         raise argparse.ArgumentTypeError(
             "At least one test number is required."
         )
@@ -1288,12 +1386,11 @@ def get_selected_tests(
     run_all: bool,
 ) -> list[tuple[int, dict]]:
     """
-    Return selected benchmark cases.
+    Return the selected benchmark cases.
 
-    IMPORTANT:
-
-    Without --all, --test, or --tests, no expensive
-    benchmark is executed accidentally.
+    The benchmark deliberately executes nothing unless the
+    caller explicitly provides --test, --tests, or --all.
+    This prevents accidental high-cost API runs.
     """
 
     total = len(
@@ -1301,7 +1398,6 @@ def get_selected_tests(
     )
 
     if run_all:
-
         return list(
             enumerate(
                 TEST_CASES,
@@ -1321,7 +1417,6 @@ def get_selected_tests(
             multiple_tests
         )
 
-    # Remove duplicates while preserving order.
     requested = list(
         dict.fromkeys(
             requested
@@ -1329,7 +1424,6 @@ def get_selected_tests(
     )
 
     if not requested:
-
         return []
 
     invalid = [
@@ -1342,7 +1436,6 @@ def get_selected_tests(
     ]
 
     if invalid:
-
         raise ValueError(
             "Invalid test number(s): "
             + ", ".join(
@@ -1363,11 +1456,10 @@ def get_selected_tests(
     ]
 
 
-# ==========================================================
-# LIST TESTS
-# ==========================================================
-
 def list_tests() -> None:
+    """
+    Print benchmark test numbers without invoking QueryService.
+    """
 
     print("=" * 80)
     print(
@@ -1379,7 +1471,6 @@ def list_tests() -> None:
         TEST_CASES,
         start=1,
     ):
-
         print(
             f"{index:>2}: "
             f"{test['question']}"
@@ -1389,17 +1480,39 @@ def list_tests() -> None:
 
 
 # ==========================================================
-# ARGUMENT PARSER
+# COMMAND-LINE ARGUMENTS
 # ==========================================================
 
 def build_argument_parser(
 ) -> argparse.ArgumentParser:
+    """
+    Build the benchmark CLI.
+
+    Cost-aware modes:
+
+        --test N
+            Run one test.
+
+        --tests 2,4,8
+            Run only selected tests.
+
+        --cached
+            Use only previously cached SQL.
+            Zero generation API calls.
+
+        --refresh
+            Force fresh SQL generation for selected tests and
+            overwrite their cache entries.
+
+        --all
+            Run every case. Use deliberately.
+    """
 
     parser = argparse.ArgumentParser(
         description=(
-            "Run SQL generalization benchmark tests "
-            "without unnecessarily invoking the LLM "
-            "for every benchmark case."
+            "Run selected SQL generalization benchmark tests "
+            "without unnecessarily invoking the LLM for every "
+            "benchmark case."
         )
     )
 
@@ -1425,8 +1538,7 @@ def build_argument_parser(
         "--all",
         action="store_true",
         help=(
-            "Run the complete benchmark. "
-            "This may cause many LLM API calls."
+            "Run the complete benchmark."
         ),
     )
 
@@ -1434,8 +1546,25 @@ def build_argument_parser(
         "--list",
         action="store_true",
         help=(
-            "List available tests without "
-            "calling the LLM."
+            "List available tests without calling the LLM."
+        ),
+    )
+
+    parser.add_argument(
+        "--cached",
+        action="store_true",
+        help=(
+            "Evaluate only previously cached SQL. "
+            "Makes zero SQL-generation LLM calls."
+        ),
+    )
+
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help=(
+            "Force fresh SQL generation for selected tests "
+            "and overwrite their cache entries."
         ),
     )
 
@@ -1443,35 +1572,29 @@ def build_argument_parser(
 
 
 # ==========================================================
-# MAIN BENCHMARK
+# MAIN
 # ==========================================================
 
 def main():
-
     parser = (
         build_argument_parser()
     )
 
     args = parser.parse_args()
 
-    # ------------------------------------------------------
-    # List mode
-    #
-    # Costs zero LLM calls.
-    # ------------------------------------------------------
+    if (
+        args.cached
+        and args.refresh
+    ):
+        parser.error(
+            "--cached and --refresh cannot be used together."
+        )
 
     if args.list:
-
         list_tests()
-
         return
 
-    # ------------------------------------------------------
-    # Select tests
-    # ------------------------------------------------------
-
     try:
-
         selected_tests = (
             get_selected_tests(
                 single_test=args.test,
@@ -1479,57 +1602,51 @@ def main():
                 run_all=args.all,
             )
         )
-
     except ValueError as exc:
-
         parser.error(
             str(exc)
         )
-
         return
 
-    # ------------------------------------------------------
-    # Protect against accidental expensive runs.
-    # ------------------------------------------------------
-
     if not selected_tests:
-
         print("=" * 80)
         print(
             "NO TESTS EXECUTED"
         )
         print("=" * 80)
-
         print(
             "Choose one of:"
         )
-
         print()
         print(
             "  --test 12"
         )
-
         print(
             "  --tests 2,4,8,12"
         )
-
         print(
             "  --all"
         )
-
         print(
             "  --list"
         )
-
         print()
         print(
-            "The full benchmark is not run "
-            "automatically to avoid unnecessary "
+            "Optional execution modes:"
+        )
+        print(
+            "  --cached"
+        )
+        print(
+            "  --refresh"
+        )
+        print()
+        print(
+            "The complete benchmark is never run "
+            "implicitly, which helps avoid unnecessary "
             "LLM API charges."
         )
-
         print("=" * 80)
-
         return
 
     print("=" * 80)
@@ -1537,7 +1654,6 @@ def main():
         "SQL GENERALIZATION BENCHMARK"
     )
     print("=" * 80)
-
     print(
         "SELECTED TESTS:",
         [
@@ -1546,72 +1662,160 @@ def main():
             in selected_tests
         ],
     )
-
     print(
         "TEST COUNT:",
         len(
             selected_tests
         ),
     )
-
+    print(
+        "MODE:",
+        (
+            "CACHED ONLY"
+            if args.cached
+            else (
+                "REFRESH"
+                if args.refresh
+                else "CACHE PREFERRED"
+            )
+        ),
+    )
     print("=" * 80)
 
-    # ------------------------------------------------------
-    # QueryService is only initialized when we're
-    # actually going to execute benchmark cases.
-    # ------------------------------------------------------
+    cache = (
+        load_benchmark_cache()
+    )
 
-    service = QueryService()
+    # In cached-only mode QueryService is never initialized.
+    # This guarantees the benchmark does not invoke Gemini
+    # for SQL generation.
+    service = (
+        None
+        if args.cached
+        else QueryService()
+    )
 
     passed = 0
-
     failed = 0
-
     errors_count = 0
-
-    # ======================================================
-    # RUN TESTS
-    # ======================================================
+    cache_hits = 0
+    llm_generations = 0
 
     for (
         test_number,
         test,
     ) in selected_tests:
-
         question = (
-            test[
-                "question"
-            ]
+            test["question"]
         )
 
         print()
         print("=" * 80)
-
         print(
             f"TEST {test_number}: "
             f"{question}"
         )
-
         print("=" * 80)
 
         try:
+            sql: str | None = None
 
-            # ----------------------------------------------
-            # Full production pipeline.
-            #
-            # This is the expensive part because the
-            # configured LLM may be called.
-            # ----------------------------------------------
+            # ==================================================
+            # CACHED-ONLY MODE
+            # ==================================================
 
-            response = (
-                service.generate_sql(
-                    question
+            if args.cached:
+                sql = get_cached_sql(
+                    cache=cache,
+                    test_number=test_number,
+                    question=question,
                 )
-            )
 
-            sql = (
-                response.sql
-            )
+                if sql is None:
+                    print()
+                    print(
+                        "STATUS: CACHE MISS"
+                    )
+                    print(
+                        "No valid cached SQL exists "
+                        "for this test."
+                    )
+
+                    errors_count += 1
+                    continue
+
+                cache_hits += 1
+
+                print()
+                print(
+                    "SOURCE: CACHE"
+                )
+
+            # ==================================================
+            # NORMAL / REFRESH MODE
+            # ==================================================
+
+            else:
+                cached_sql = (
+                    get_cached_sql(
+                        cache=cache,
+                        test_number=test_number,
+                        question=question,
+                    )
+                )
+
+                if (
+                    cached_sql is not None
+                    and not args.refresh
+                ):
+                    sql = cached_sql
+                    cache_hits += 1
+
+                    print()
+                    print(
+                        "SOURCE: CACHE"
+                    )
+
+                else:
+                    print()
+                    print(
+                        "SOURCE: LLM"
+                    )
+
+                    if service is None:
+                        raise RuntimeError(
+                            "QueryService is unavailable "
+                            "for fresh generation."
+                        )
+
+                    response = (
+                        service.generate_sql(
+                            question
+                        )
+                    )
+
+                    sql = response.sql
+                    llm_generations += 1
+
+                    store_cached_sql(
+                        cache=cache,
+                        test_number=test_number,
+                        question=question,
+                        sql=sql,
+                    )
+
+                    save_benchmark_cache(
+                        cache
+                    )
+
+            if sql is None:
+                raise RuntimeError(
+                    "No SQL was available for evaluation."
+                )
+
+            # ==================================================
+            # DETERMINISTIC EVALUATION
+            # ==================================================
 
             valid, evaluation_errors = (
                 evaluate_case(
@@ -1624,25 +1828,19 @@ def main():
             print(
                 "GENERATED SQL:"
             )
-
             print("-" * 80)
-
             print(
                 sql
             )
-
             print()
 
             if valid:
-
                 print(
                     "STATUS: PASS"
                 )
-
                 passed += 1
 
             else:
-
                 print(
                     "STATUS: FAIL"
                 )
@@ -1650,7 +1848,6 @@ def main():
                 for error in (
                     evaluation_errors
                 ):
-
                     print(
                         "ERROR:",
                         error,
@@ -1659,27 +1856,20 @@ def main():
                 failed += 1
 
         except Exception as exc:
-
             errors_count += 1
 
             print()
             print(
                 "STATUS: ERROR"
             )
-
             print(
                 "EXCEPTION:",
                 type(exc).__name__,
             )
-
             print(
                 "MESSAGE:",
                 str(exc),
             )
-
-    # ======================================================
-    # SUMMARY
-    # ======================================================
 
     total = len(
         selected_tests
@@ -1712,39 +1902,36 @@ def main():
 
     print()
     print("=" * 80)
-
     print(
         "SQL GENERALIZATION SUMMARY"
     )
-
     print("=" * 80)
-
     print(
         f"PASSED: {passed}"
     )
-
     print(
         f"FAILED: {failed}"
     )
-
     print(
         f"ERRORS: {errors_count}"
     )
-
     print(
         f"TOTAL EXECUTED: {total}"
     )
-
+    print(
+        f"CACHE HITS: {cache_hits}"
+    )
+    print(
+        f"FRESH LLM GENERATIONS: {llm_generations}"
+    )
     print(
         "SEMANTIC ACCURACY: "
         f"{semantic_accuracy:.2f}%"
     )
-
     print(
         "EVALUATION COMPLETION: "
         f"{evaluation_completion:.2f}%"
     )
-
     print("=" * 80)
 
 
