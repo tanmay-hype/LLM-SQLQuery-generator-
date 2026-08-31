@@ -35,7 +35,9 @@ def get_query_service() -> QueryService:
     Reusing the service prevents the FAISS index from being
     reloaded from disk for every API request.
     """
-    return QueryService()
+    return QueryService(
+        sql_cache=get_sql_cache(),
+    )
 
 
 def get_db():
