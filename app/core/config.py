@@ -81,6 +81,7 @@ class Settings(BaseSettings):
 
     # Maximum number of embeddings stored in the
     # process-local LRU embedding cache.
+    
     embedding_cache_size: int = 256
 
     # ==================================================
@@ -96,6 +97,14 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://ollama:11434"
 
     ollama_model: str = "qwen2.5-coder:14b"
+    
+    
+    # ------------------------------------------------------
+    # SQL CACHE
+    # ------------------------------------------------------
+
+    sql_cache_enabled: bool = True
+    sql_cache_size: int = 256
 
     # ==================================================
     # Schema Retrieval

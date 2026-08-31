@@ -1,10 +1,22 @@
 from functools import lru_cache
-
+from app.cache.sql_cache import SQLCache
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services.query_service import QueryService
 
 
 @lru_cache(maxsize=1)
+def get_sql_cache() -> SQLCache:
+    """
+    Return the application-wide SQLCache instance.
+
+    SQLCache is a singleton that caches generated SQL queries
+    to improve performance and reduce redundant query generation.
+    """
+    return SQLCache(
+        max_size=settings.sql_cache_size
+    )
+    
 def get_query_service() -> QueryService:
     """
     Return the application-wide QueryService instance.
