@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from sqlglot import exp, parse_one
 
+from app.services.schema_relationship_extractor import (SchemaRelationshipExtractor)
 from app.models.intent import QueryIntent
 from app.models.semantic_contract import SemanticContract
 from app.services.semantic_contract_builder import (
@@ -177,10 +178,15 @@ class SemanticValidator:
     def __init__(
         self,
         contract_builder: SemanticContractBuilder | None = None,
+        relationship_extractor: SchemaRelationshipExtractor | None = None,
     ):
         self.contract_builder = (
             contract_builder
             or SemanticContractBuilder()
+        )
+        self.relationship_extractor = (
+            relationship_extractor
+            or SchemaRelationshipExtractor()
         )
 
     # ======================================================
@@ -306,6 +312,7 @@ class SemanticValidator:
             self._validate_join(
                 statement=statement,
                 contract=contract,
+                schema=schema,
             )
         )
 
@@ -664,40 +671,312 @@ class SemanticValidator:
     # JOIN VALIDATION
     # ======================================================
 
-    @staticmethod
     def _validate_join(
+        self,
         statement,
         contract: SemanticContract,
+        schema: dict,
     ) -> list[str]:
         """
-        Validate that an explicit JOIN exists when JOIN
-        intent was detected.
+        Validate JOIN semantics.
 
-        This prevents a query from silently dropping a
-        required relationship between tables.
+        Validation includes:
+
+        1. A JOIN must exist when JOIN intent is required.
+        2. JOIN equality predicates between physical tables
+           must correspond to declared foreign-key
+           relationships.
+        3. Table aliases are resolved before FK comparison.
+
+        Examples:
+
+            Valid:
+                orders.customer_id = customers.id
+
+            Valid with aliases:
+                o.customer_id = c.id
+
+            Invalid:
+                orders.id = customers.id
         """
-
-        if not contract.requires_join:
-            return []
-
-        has_join = (
-            statement.find(
+        joins = list(
+            statement.find_all(
                 exp.Join
             )
-            is not None
         )
-
-        if has_join:
-            return []
-
-        return [
-            (
+        
+        # --------------------------------------------------
+        # JOIN required but completely missing.
+        # --------------------------------------------------
+        
+        if (
+            contract.requires_join
+            and not joins
+        ):
+            return [
                 "The detected intent requires a JOIN, "
-                "but the generated SQL does not contain "
-                "an explicit JOIN."
+                "but the generated SQL contains no JOIN."
+            ]
+        
+        # --------------------------------------------------
+        # No JOIN means there is nothing further to validate.
+        #
+        # This also allows ordinary single-table queries.
+        # --------------------------------------------------
+        
+        if not joins:
+            return []
+        
+        relationships = self.relationship_extractor.extract(
+            schema
+        )
+        
+        # --------------------------------------------------
+        # If the schema contains no FK metadata, do not
+        # invent relationships or reject based on guesses.
+        # --------------------------------------------------
+        
+        if not relationships:
+            return []
+        
+        alias_map = self._build_table_alias_map(
+            statement
+        )
+        
+        errors: list[str] = []
+        
+        for join in joins:
+            
+            errors.extend(
+                self._validate_join_expression(
+                    join=join,
+                    alias_map=alias_map,
+                    relationships=relationships,
+                )
+            )
+            
+        return errors
+    
+    
+    # ======================================================
+    # TABLE ALIAS MAP
+    # ======================================================
+    
+    @staticmethod
+    def _build_table_alias_map(
+        statement,
+    ) -> dict[str, str]:
+        """
+        Build a mapping of table aliases to physical table names.
+
+        Example:
+
+            FROM customers c
+            JOIN orders o ...
+
+        becomes:
+
+            {
+                "customers": "customers",
+                "c": "customers",
+                "orders": "orders",
+                "o": "orders",
+            }
+        """
+
+        alias_map: dict[str, str] = {}
+
+        for table in statement.find_all(
+            exp.Table
+        ):
+            
+            table_name = table.name
+            
+            if not table_name:
+                continue
+            
+            alias_map[table_name] = table_name  
+            
+            alias = table.alias
+            
+            if alias:
+                alias_map[alias] = table_name
+    
+        return alias_map
+
+
+    # ======================================================
+    # SINGLE JOIN VALIDATION
+    # ======================================================
+    
+    
+    def _validate_join_expression(
+        self,
+        join,
+        alias_map: dict[str, str],
+        relationships,
+    ) -> list[str]:
+        """
+        Validate a single join expression against the provided alias map and relationships.
+        """
+        
+        on_expression = join.args.get(
+            "on"
+        )
+        
+        if on_expression is None:
+            return [
+                (
+                "The generated JOIN does not contain"
+                " an ON condition that can be validated"
+                "against schema relationships"
+                )
+            ]
+            
+        equality_predicates = list(
+            on_expression.find_all(
+                exp.EQ
+            )
+        )
+        
+        #The root ON expression itself may be an EQ
+        
+        if isinstance(on_expression, exp.EQ):
+            equality_predicates.insert(
+                0,
+                on_expression
+            )
+        
+        # Remove duplicates caused by the root expression
+        # also appearing in find_all().
+        
+        unique_predicates = []
+        
+        seen_ids: set[int] = set()
+        
+        for predicate in equality_predicates:
+            
+            predicate_id = id(predicate)
+            
+            if predicate_id in seen_ids:
+                continue
+            
+            seen_ids.add(predicate_id)
+            unique_predicates.append(
+                predicate
+            )
+        
+        if not unique_predicates:
+            return [
+                (
+                "The generated JOIN does not contain"
+                " an equality predicate that can be validated"
+                " against schema relationships"
+                )
+            ]
+        
+        found_column_pair = False
+        
+        for predicate in unique_predicates:
+            
+            left = predicate.this
+            right = predicate.expression
+            
+            if (
+                not isinstance(left, exp.Column)
+                or not isinstance(right, exp.Column)
+            ):
+                continue
+            
+            left_table = self._resolve_column_table(
+                column=left,
+                alias_map=alias_map,
+            )
+            
+            right_table = self._resolve_column_table(
+                column=right,
+                alias_map=alias_map,
+            )
+            
+            # ----------------------------------------------
+            # Unqualified columns cannot safely establish
+            # which physical tables participate.
+            # ----------------------------------------------
+            
+            if(
+                left_table is None
+                or right_table is None
+            ):
+                continue
+            
+            found_column_pair = True
+            
+            left_column = left.name
+            right_column = right.name
+            
+            for relationship in relationships:
+                
+                if relationship.matches(
+                    left_table=left_table,
+                    left_column=left_column,
+                    right_table=right_table,
+                    right_column=right_column,
+                ):
+                    return[]
+        
+        if not found_column_pair:
+            return [
+                (
+                "The generated JOIN does not contain"
+                " an equality predicate between two "
+                "physical columns that can be validated"
+                " against schema relationships"
+                )
+            ]
+        return [ 
+            (
+                "The JOIN condition does not match any"
+                " declared foreign-key relationships in the schema."
+                    
             )
         ]
+    
+    # ======================================================
+    # COLUMN TABLE RESOLUTION
+    # ======================================================
 
+    @staticmethod
+    def _resolve_column_table(
+        column,
+        alias_map: dict[str, str],
+    ) -> str | None:
+        """
+        Resolve a SQLGlot Column table qualifier to its
+        physical table name.
+
+        Example:
+
+            o.customer_id
+
+        with:
+
+            o -> orders
+
+        resolves to:
+
+            orders
+        """
+
+        table_reference = column.table
+
+        if not table_reference:
+            return None
+
+        return alias_map.get(
+            table_reference
+        )
+    
+    
     # ======================================================
     # AGGREGATE DETECTION
     # ======================================================
