@@ -270,3 +270,32 @@ class SQLCache(BaseSQLCache):
         logger.debug(
             "SQL cache statistics reset."
         )
+    
+    def delete(
+        self,
+        key: str,
+    ) -> bool:
+        """
+        Delete a cache entry.
+
+        Returns True if an entry existed and was deleted.
+        Returns False if the key did not exist.
+        """
+        
+        if not key:
+            raise ValueError(
+                "SQL cache key cannot be empty."
+            )
+            
+        with self._lock:
+            if key not in self._cache:
+                return False
+            
+            del self._cache[key]
+            
+            logger.debug(
+                "SQL cache entry deleted."
+            )
+            
+            return True
+        

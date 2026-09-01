@@ -643,6 +643,16 @@ class QueryService:
                 "Cached SQL failed structural validation: %s",
                 exc,
             )
+            
+            deleted = self.sql_cache.delete(
+                cache_key
+            )
+            
+            if deleted:
+                logger.info(
+                    "Deleted invalid cached SQL from production cache."
+                )
+                
             return None
         
         logger.info(

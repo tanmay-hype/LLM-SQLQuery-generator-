@@ -2,24 +2,13 @@ from abc import ABC, abstractmethod
 
 
 class BaseSQLCache(ABC):
-    """
-    Interface for SQL cache implementations.
-
-    QueryService will depend on this abstraction rather
-    than a concrete in-memory or Redis implementation.
-    """
 
     @abstractmethod
     def get(
         self,
         key: str,
     ) -> str | None:
-        """
-        Return cached SQL for the key.
-
-        Returns None when the key does not exist.
-        """
-        raise NotImplementedError
+        pass
 
     @abstractmethod
     def set(
@@ -27,21 +16,29 @@ class BaseSQLCache(ABC):
         key: str,
         sql: str,
     ) -> None:
-        """
-        Store validated SQL.
-        """
-        raise NotImplementedError
+        pass
 
     @abstractmethod
-    def clear(self) -> None:
+    def delete(
+        self,
+        key: str,
+    ) -> bool:
         """
-        Remove all cached SQL entries.
+        Delete a cache entry.
+
+        Returns True if an entry existed and was deleted.
+        Returns False if the key did not exist.
         """
-        raise NotImplementedError
+        pass
 
     @abstractmethod
-    def __len__(self) -> int:
-        """
-        Return number of cached entries.
-        """
-        raise NotImplementedError
+    def clear(
+        self,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    def __len__(
+        self,
+    ) -> int:
+        pass

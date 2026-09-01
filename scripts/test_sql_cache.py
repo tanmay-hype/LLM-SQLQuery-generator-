@@ -215,9 +215,52 @@ def main():
     print(
         "[PASS] LRU eviction"
     )
-
+    
     # ------------------------------------------------------
-    # 9. Clear
+    # 9. Delete
+    # ------------------------------------------------------
+     
+    delete_key = cache.build_key(
+        question="Delete test",
+        schema_fingerprint="schema-v1",
+        provider="gemini",
+        model="gemini-2.5-pro",
+        cache_version="v1",
+    )
+
+    cache.set(
+        delete_key,
+        "SELECT 1;",
+    )
+
+    assert cache.get(
+        delete_key
+    ) == "SELECT 1;"
+
+    deleted = cache.delete(
+        delete_key
+    )
+
+    assert deleted is True
+
+    assert cache.get(
+        delete_key 
+    ) is None
+
+    # Deleting an already missing key should be safe.
+    
+    deleted_again = cache.delete(
+        delete_key
+    )
+
+    assert deleted_again is False
+
+    print(
+       "[PASS] Cache delete"
+    ) 
+    
+    # ------------------------------------------------------
+    # 10. Clear
     # ------------------------------------------------------
 
     cache.clear()
