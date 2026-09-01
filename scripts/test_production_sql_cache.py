@@ -11,6 +11,7 @@ def main():
 
     cache = get_sql_cache()
     cache.clear()
+    cache.reset_stats()
 
     service = get_query_service()
 
@@ -41,6 +42,11 @@ def main():
     )
 
     assert len(cache) == 1
+    stats_1 = cache.stats()
+    
+    assert stats_1["hits"] == 0
+    assert stats_1["misses"] == 1
+    assert stats_1["stores"] == 1
 
     # ------------------------------------------------------
     # Second request
@@ -63,6 +69,11 @@ def main():
         "Cache size after second request:",
         len(cache),
     )
+    
+    print(
+        "Cache stats after second request:",
+        cache.stats(),
+    )
 
     assert (
         response_1.sql
@@ -70,6 +81,15 @@ def main():
     )
 
     assert len(cache) == 1
+    
+    stats_2 = cache.stats()
+    
+    assert stats_2["hits"] == 1
+    assert stats_2["misses"] == 1
+    assert stats_2["stores"] == 1
+    assert stats_2["evictions"] == 0
+    assert stats_2["current_size"] == 1
+    assert stats_2["hit_rate"] == 0.5
 
     print()
     print("=" * 70)

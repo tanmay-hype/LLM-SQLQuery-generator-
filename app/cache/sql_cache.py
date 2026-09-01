@@ -35,6 +35,15 @@ class SQLCache(BaseSQLCache):
         ] = OrderedDict()
 
         self._lock = RLock()
+        
+        # ==================================================
+        # CACHE METRICS
+        # ==================================================
+        
+        self._hits = 0
+        self._misses = 0
+        self._stores = 0
+        self._evictions = 0
 
     # ======================================================
     # KEY GENERATION
@@ -135,10 +144,13 @@ class SQLCache(BaseSQLCache):
             )
 
             if sql is None:
+                self._misses += 1
                 logger.debug(
                     "SQL cache miss."
                 )
                 return None
+            
+            self._hits += 1
 
             # Mark entry as recently used.
             self._cache.move_to_end(
@@ -174,7 +186,9 @@ class SQLCache(BaseSQLCache):
             self._cache.move_to_end(
                 key
             )
-
+            
+            self._stores += 1
+            
             # Remove least recently used entries.
             while (
                 len(self._cache)
@@ -183,7 +197,9 @@ class SQLCache(BaseSQLCache):
                 self._cache.popitem(
                     last=False
                 )
-
+                
+                self._evictions += 1
+                
             logger.debug(
                 "SQL cached successfully."
             )
@@ -201,3 +217,47 @@ class SQLCache(BaseSQLCache):
             return len(
                 self._cache
             )
+            
+    # ======================================================
+    # CACHE METRICS
+    # ======================================================
+    
+    def stats(self) -> dict:
+        """Return cache statistics."""
+        
+        with self._lock:
+            
+            requests = (
+                self._hits
+                + self._misses
+            )
+            
+            hit_rate = (
+                self._hits / requests
+                if requests > 0
+                else 0.0
+            )
+            
+            return {
+                "hits": self._hits,
+                "misses": self._misses,
+                "hit_rate": hit_rate,
+                "stores": self._stores,
+                "evictions": self._evictions,
+                "current_size": len(self._cache),
+                "max_size": self.max_size,
+                "hit_rate": hit_rate,
+            }
+            
+    def reset_stats(self) -> None:
+        """Reset cache statistics."""
+        
+        with self._lock:
+            self._hits = 0
+            self._misses = 0
+            self._stores = 0
+            self._evictions = 0
+            
+        logger.debug(
+            "SQL cache statistics reset."
+        )
