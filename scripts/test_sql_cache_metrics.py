@@ -16,6 +16,7 @@ def main():
         schema_fingerprint="schema-v1",
         provider="gemini",
         model="gemini-2.5-pro",
+        cache_version="v1",
     )
 
     key_2 = cache.build_key(
@@ -23,6 +24,7 @@ def main():
         schema_fingerprint="schema-v1",
         provider="gemini",
         model="gemini-2.5-pro",
+        cache_version="v2",
     )
 
     key_3 = cache.build_key(
@@ -30,6 +32,7 @@ def main():
         schema_fingerprint="schema-v1",
         provider="gemini",
         model="gemini-2.5-pro",
+        cache_version="v3",
     )
 
     # ------------------------------------------------------

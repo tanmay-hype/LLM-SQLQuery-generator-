@@ -81,6 +81,7 @@ class SQLCache(BaseSQLCache):
         schema_fingerprint: str,
         provider: str,
         model: str,
+        cache_version: str,
     ) -> str:
         """
         Build a deterministic cache key.
@@ -93,6 +94,11 @@ class SQLCache(BaseSQLCache):
         if not question.strip():
             raise ValueError(
                 "Question cannot be empty."
+            )
+        
+        if not cache_version.strip():
+            raise ValueError(
+                "Cache version cannot be empty."
             )
 
         if not schema_fingerprint:
@@ -116,6 +122,9 @@ class SQLCache(BaseSQLCache):
             ),
             "model": (
                 model.strip().lower()
+            ),
+            "cache_version": (
+                cache_version.strip().lower()
             ),
         }
 

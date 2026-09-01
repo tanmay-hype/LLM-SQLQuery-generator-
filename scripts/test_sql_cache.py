@@ -11,7 +11,7 @@ def main():
     )
 
     # ------------------------------------------------------
-    # 1. Deterministic key
+    # 1. Deterministic key / question normalization
     # ------------------------------------------------------
 
     key_1 = cache.build_key(
@@ -19,6 +19,7 @@ def main():
         schema_fingerprint="schema-v1",
         provider="gemini",
         model="gemini-2.5-pro",
+        cache_version="v1",
     )
 
     key_2 = cache.build_key(
@@ -26,6 +27,7 @@ def main():
         schema_fingerprint="schema-v1",
         provider="Gemini",
         model="GEMINI-2.5-PRO",
+        cache_version="v1",
     )
 
     assert key_1 == key_2
@@ -35,7 +37,28 @@ def main():
     )
 
     # ------------------------------------------------------
-    # 2. Cache miss
+    # 2. Cache version -> different key
+    # ------------------------------------------------------
+
+    version_v2_key = cache.build_key(
+        question="Show all customers",
+        schema_fingerprint="schema-v1",
+        provider="gemini",
+        model="gemini-2.5-pro",
+        cache_version="v2",
+    )
+
+    assert (
+        version_v2_key
+        != key_1
+    )
+
+    print(
+        "[PASS] Cache version changes key"
+    )
+
+    # ------------------------------------------------------
+    # 3. Cache miss
     # ------------------------------------------------------
 
     assert cache.get(
@@ -47,7 +70,7 @@ def main():
     )
 
     # ------------------------------------------------------
-    # 3. Cache set/get
+    # 4. Cache set/get
     # ------------------------------------------------------
 
     sql = (
@@ -70,16 +93,15 @@ def main():
     )
 
     # ------------------------------------------------------
-    # 4. Different schema -> different key
+    # 5. Different schema -> different key
     # ------------------------------------------------------
 
-    changed_schema_key = (
-        cache.build_key(
-            question="Show all customers",
-            schema_fingerprint="schema-v2",
-            provider="gemini",
-            model="gemini-2.5-pro",
-        )
+    changed_schema_key = cache.build_key(
+        question="Show all customers",
+        schema_fingerprint="schema-v2",
+        provider="gemini",
+        model="gemini-2.5-pro",
+        cache_version="v1",
     )
 
     assert (
@@ -96,16 +118,15 @@ def main():
     )
 
     # ------------------------------------------------------
-    # 5. Different model -> different key
+    # 6. Different model -> different key
     # ------------------------------------------------------
 
-    different_model_key = (
-        cache.build_key(
-            question="Show all customers",
-            schema_fingerprint="schema-v1",
-            provider="gemini",
-            model="another-model",
-        )
+    different_model_key = cache.build_key(
+        question="Show all customers",
+        schema_fingerprint="schema-v1",
+        provider="gemini",
+        model="another-model",
+        cache_version="v1",
     )
 
     assert (
@@ -118,7 +139,28 @@ def main():
     )
 
     # ------------------------------------------------------
-    # 6. LRU eviction
+    # 7. Different provider -> different key
+    # ------------------------------------------------------
+
+    different_provider_key = cache.build_key(
+        question="Show all customers",
+        schema_fingerprint="schema-v1",
+        provider="openai",
+        model="gemini-2.5-pro",
+        cache_version="v1",
+    )
+
+    assert (
+        different_provider_key
+        != key_1
+    )
+
+    print(
+        "[PASS] Provider-aware key"
+    )
+
+    # ------------------------------------------------------
+    # 8. LRU eviction
     # ------------------------------------------------------
 
     key_b = cache.build_key(
@@ -126,6 +168,7 @@ def main():
         schema_fingerprint="schema-v1",
         provider="gemini",
         model="gemini-2.5-pro",
+        cache_version="v1",
     )
 
     cache.set(
@@ -143,6 +186,7 @@ def main():
         schema_fingerprint="schema-v1",
         provider="gemini",
         model="gemini-2.5-pro",
+        cache_version="v1",
     )
 
     cache.set(
@@ -152,16 +196,18 @@ def main():
 
     assert len(cache) == 2
 
-    # key_b should have been evicted.
+    # key_b should have been evicted because key_1
+    # was accessed more recently.
     assert cache.get(
         key_b
     ) is None
 
-    # key_1 was recently used and should remain.
+    # key_1 should still exist.
     assert cache.get(
         key_1
     ) is not None
 
+    # key_c should also exist.
     assert cache.get(
         key_c
     ) is not None
@@ -171,7 +217,7 @@ def main():
     )
 
     # ------------------------------------------------------
-    # 7. Clear
+    # 9. Clear
     # ------------------------------------------------------
 
     cache.clear()

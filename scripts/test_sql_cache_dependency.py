@@ -28,6 +28,7 @@ def main():
         schema_fingerprint="test-schema",
         provider="gemini",
         model="gemini-2.5-pro",
+        cache_version="v1",
     )
 
     cache_1.set(

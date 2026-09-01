@@ -105,6 +105,7 @@ class Settings(BaseSettings):
 
     sql_cache_enabled: bool = True
     sql_cache_size: int = 256
+    sql_cache_version: str = "v1"
 
     # ==================================================
     # Schema Retrieval

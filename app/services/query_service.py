@@ -601,6 +601,7 @@ class QueryService:
             schema_fingerprint=schema_fingerprint,
             provider=provider,
             model=model,
+            cache_version=settings.sql_cache_version,
         )
         
     def _get_cached_sql(
