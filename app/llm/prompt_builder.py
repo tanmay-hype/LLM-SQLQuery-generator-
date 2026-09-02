@@ -73,7 +73,36 @@ If the question cannot be answered from the provided schema,
 return:
 
 SELECT 'Insufficient information';
+
 """
+
+
+    AMBIGUITY_RULES = """
+Ambiguity handling:
+
+- Return SELECT 'Insufficient information'; only when the user's request is genuinely too vague or underspecified to determine one reliable SQL interpretation.
+
+- Do not invent a table, metric, ranking criterion, aggregation, relationship, or business meaning when the user has not provided enough information.
+
+- Requests such as "show totals", "show activity", or "show the best customers" are underspecified because they do not identify what should be totaled, what activity means, or what criterion defines "best".
+
+- Do NOT return insufficient information merely because the request uses natural-language wording instead of exact schema column names.
+
+- If the request clearly identifies an entity or operation that can be mapped to the provided schema, generate the SQL.
+
+- Natural-language filters are sufficient when they map unambiguously to schema columns and SQL operators. Examples:
+  - "after January 1, 2025" means a date comparison using >.
+  - "before January 1, 2025" means a date comparison using <.
+  - "more than 1000" means > 1000.
+  - "not from Delhi" means a non-equality filter.
+
+- Normalize clear natural-language date values into SQL-compatible date literals when necessary.
+
+- Unsupported requested information that does not exist anywhere in the provided schema should still return exactly:
+
+SELECT 'Insufficient information';
+"""
+
 
     # ======================================================
     # SAFETY RULES
@@ -441,11 +470,19 @@ SQL:
     def _rules_prompt(self) -> str:
         """
         Build the SQL rules section.
+        
         """
+        
+        content = "\n\n".join(
+            [
+                self.SQL_RULES,
+                self.AMBIGUITY_RULES,
+            ]
+        )
 
         return self._section(
-            "SQL RULES",
-            self.SQL_RULES,
+           "SQL RULES",
+           content,
         )
 
     # ======================================================

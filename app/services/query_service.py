@@ -378,7 +378,7 @@ class QueryService:
             "Retrieved %d prompt examples.",
             len(examples),
         )
-
+        
         # --------------------------------------------------
         # 10. Build prompt
         # --------------------------------------------------

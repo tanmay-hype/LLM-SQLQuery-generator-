@@ -183,6 +183,38 @@ class SchemaCompressor:
         r"\bhaving\s+\w+",
         r"\bwhose\b",
     )
+    
+    
+    # ======================================================
+    # TEMPORAL FILTER LANGUAGE
+    # ======================================================
+
+    TEMPORAL_QUESTION_KEYWORDS = {
+        "after",
+        "before",
+        "since",
+        "until",
+        "between",
+        "during",
+        "today",
+        "yesterday",
+        "tomorrow",
+        "recent",
+        "latest",
+        "earliest",
+        "newest",
+        "oldest",
+        "date",
+        "dates",
+        "day",
+        "daily",
+        "week",
+        "weekly",
+        "month",
+        "monthly",
+        "year",
+        "yearly",
+    }
 
     # ======================================================
     # PUBLIC API
@@ -234,6 +266,11 @@ class SchemaCompressor:
                 question
             )
         )
+        
+        temporal_question = bool(
+            tokens
+            & self.TEMPORAL_QUESTION_KEYWORDS
+        )
 
         compressed: dict = {}
 
@@ -247,6 +284,7 @@ class SchemaCompressor:
                     normalized_tokens=normalized_tokens,
                     semantic_columns=semantic_columns,
                     filter_like_question=filter_like_question,
+                    temporal_question=temporal_question,
                     intent=intent,
                 )
             )
@@ -423,6 +461,7 @@ class SchemaCompressor:
         normalized_tokens: set[str],
         semantic_columns: set[str],
         filter_like_question: bool,
+        temporal_question: bool,
         intent: IntentAnalysis,
     ) -> dict:
         """
@@ -445,6 +484,7 @@ class SchemaCompressor:
                 normalized_tokens=normalized_tokens,
                 semantic_columns=semantic_columns,
                 filter_like_question=filter_like_question,
+                temporal_question=temporal_question,
                 intent=intent,
             )
         ]
@@ -485,6 +525,7 @@ class SchemaCompressor:
         normalized_tokens: set[str],
         semantic_columns: set[str],
         filter_like_question: bool,
+        temporal_question: bool,
         intent: IntentAnalysis,
     ) -> bool:
         """
@@ -649,6 +690,18 @@ class SchemaCompressor:
             intent,
             QueryIntent.TIME_SERIES,
         ):
+
+            if self._matches_keywords(
+                name,
+                self.TIME_COLUMNS,
+            ):
+                return True
+        
+        # ==================================================
+        # 10b. Temporal question
+        # ==================================================
+
+        if temporal_question:
 
             if self._matches_keywords(
                 name,
