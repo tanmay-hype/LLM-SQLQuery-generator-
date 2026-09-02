@@ -342,6 +342,31 @@ class SQLValidator:
                     set(),
                 )
             )
+        
+        # ==================================================
+        # PHYSICAL COLUMN OWNERSHIP
+        # ==================================================
+
+        column_owners: dict[
+            str,
+            set[str],
+        ] = {}
+
+        for table_name in referenced_schema_tables:
+
+            for column_name in (
+                schema_columns_by_table.get(
+                    table_name,
+                    set(),
+                )
+            ):
+
+                column_owners.setdefault(
+                    column_name,
+                    set(),
+                ).add(
+                    table_name
+                )
 
         # ==================================================
         # SELECT ALIASES
@@ -462,6 +487,452 @@ class SQLValidator:
                     "Unknown column referenced: "
                     f"{column_name}"
                 )
+            
+            # --------------------------------------------------
+            # Ambiguous physical column
+            #
+            # Example:
+            #
+            #     SELECT id
+            #     FROM customers
+            #     JOIN orders ...
+            #
+            # Both customers and orders contain "id", so
+            # PostgreSQL cannot determine which column was
+            # intended.
+            # --------------------------------------------------
+
+            owners = column_owners.get(
+                column_name,
+                set(),
+            )
+
+            if len(owners) > 1:
+
+                raise SQLValidationError(
+                    "Ambiguous unqualified column "
+                    f"referenced: {column_name}. "
+                    "Possible tables: "
+                    + ", ".join(
+                        sorted(owners)
+                    )
+                )
+            
+        # ==================================================
+        # AGGREGATE / GROUP BY CONSISTENCY
+        # ==================================================
+
+        cls._validate_aggregate_projection(
+            statement
+        )
+        
+    # ======================================================
+    # AGGREGATE PROJECTION VALIDATION
+    # ======================================================
+
+    @classmethod
+    def _validate_aggregate_projection(
+        cls,
+        statement,
+    ) -> None:
+        """
+        Validate PostgreSQL aggregate projection rules.
+
+        Examples
+        --------
+
+        Valid:
+
+            SELECT SUM(total_amount)
+            FROM orders;
+
+        Valid:
+
+            SELECT
+                customer_id,
+                SUM(total_amount)
+            FROM orders
+            GROUP BY customer_id;
+
+        Invalid:
+
+            SELECT
+                customer_id,
+                SUM(total_amount)
+            FROM orders;
+
+        This validation focuses on the outer SELECT query.
+        Nested SELECT statements are validated independently
+        when encountered.
+        """
+
+        for select_node in statement.find_all(
+            exp.Select
+        ):
+
+            cls._validate_single_select_aggregate_projection(
+                select_node
+            )
+
+    # ------------------------------------------------------
+
+    @classmethod
+    def _validate_single_select_aggregate_projection(
+        cls,
+        select_node,
+    ) -> None:
+        """
+        Validate aggregate/grouping consistency for one SELECT.
+        """
+
+        projections = list(
+            select_node.expressions
+        )
+
+        if not projections:
+            return
+
+        # --------------------------------------------------
+        # Does this SELECT contain an aggregate projection?
+        # --------------------------------------------------
+
+        has_aggregate = any(
+            cls._expression_contains_aggregate(
+                projection
+            )
+            for projection in projections
+        )
+
+        if not has_aggregate:
+            return
+
+        group = select_node.args.get(
+            "group"
+        )
+
+        group_expressions = (
+            list(group.expressions)
+            if group is not None
+            else []
+        )
+
+        # --------------------------------------------------
+        # Normalize GROUP BY expressions.
+        # --------------------------------------------------
+
+        normalized_group_expressions = {
+            cls._normalize_expression(
+                expression
+            )
+            for expression in group_expressions
+        }
+
+        grouped_column_names: set[str] = set()
+
+        for expression in group_expressions:
+
+            if isinstance(
+                expression,
+                exp.Column,
+            ):
+                grouped_column_names.add(
+                    expression.name
+                )
+
+        # --------------------------------------------------
+        # GROUP BY may reference a SELECT alias.
+        #
+        # Example:
+        #
+        # SELECT
+        #     DATE_TRUNC(
+        #         'month',
+        #         order_date
+        #     ) AS month,
+        #     COUNT(*)
+        # FROM orders
+        # GROUP BY month;
+        # --------------------------------------------------
+
+        grouped_aliases = {
+            expression.name
+            for expression in group_expressions
+            if isinstance(
+                expression,
+                exp.Column,
+            )
+        }
+
+        # --------------------------------------------------
+        # Validate every SELECT projection.
+        # --------------------------------------------------
+
+        for projection in projections:
+
+            expression = projection
+
+            alias = None
+
+            if isinstance(
+                projection,
+                exp.Alias,
+            ):
+                alias = projection.alias
+
+                expression = projection.this
+
+            # ----------------------------------------------
+            # Pure aggregate expression.
+            # ----------------------------------------------
+
+            if cls._is_fully_aggregate_expression(
+                expression
+            ):
+                continue
+
+            # ----------------------------------------------
+            # Constants do not need GROUP BY.
+            #
+            # SELECT 'all', COUNT(*)
+            # FROM orders;
+            # ----------------------------------------------
+
+            if not cls._expression_has_physical_column(
+                expression
+            ):
+                continue
+
+            # ----------------------------------------------
+            # Exact GROUP BY expression.
+            #
+            # SELECT DATE_TRUNC('month', order_date)
+            # ...
+            # GROUP BY DATE_TRUNC('month', order_date)
+            # ----------------------------------------------
+
+            normalized_expression = (
+                cls._normalize_expression(
+                    expression
+                )
+            )
+
+            if (
+                normalized_expression
+                in normalized_group_expressions
+            ):
+                continue
+
+            # ----------------------------------------------
+            # GROUP BY SELECT alias.
+            # ----------------------------------------------
+
+            if (
+                alias
+                and alias in grouped_aliases
+            ):
+                continue
+
+            # ----------------------------------------------
+            # Simple grouped column.
+            # ----------------------------------------------
+
+            if isinstance(
+                expression,
+                exp.Column,
+            ):
+
+                if (
+                    expression.name
+                    in grouped_column_names
+                ):
+                    continue
+
+            # ----------------------------------------------
+            # Expression containing aggregates and ordinary
+            # columns.
+            #
+            # Example:
+            #
+            # customer_id + SUM(total_amount)
+            #
+            # This is valid only when every non-aggregate
+            # physical column is individually grouped.
+            # ----------------------------------------------
+
+            if cls._expression_contains_aggregate(
+                expression
+            ):
+
+                non_aggregate_columns = (
+                    cls._get_non_aggregate_columns(
+                        expression
+                    )
+                )
+
+                if (
+                    non_aggregate_columns
+                    and all(
+                        column.name
+                        in grouped_column_names
+                        for column
+                        in non_aggregate_columns
+                    )
+                ):
+                    continue
+
+            raise SQLValidationError(
+                "Aggregate query contains a "
+                "non-aggregated SELECT expression "
+                "that is not included in GROUP BY: "
+                f"{expression.sql(dialect='postgres')}"
+            )
+
+    # ======================================================
+    # AGGREGATE EXPRESSION HELPERS
+    # ======================================================
+
+    @staticmethod
+    def _expression_contains_aggregate(
+        expression,
+    ) -> bool:
+        """
+        Return True when an expression contains an aggregate.
+        """
+
+        if isinstance(
+            expression,
+            exp.AggFunc,
+        ):
+            return True
+
+        return (
+            expression.find(
+                exp.AggFunc
+            )
+            is not None
+        )
+
+    # ------------------------------------------------------
+
+    @classmethod
+    def _is_fully_aggregate_expression(
+        cls,
+        expression,
+    ) -> bool:
+        """
+        Return True when all physical column references in
+        an expression occur inside aggregate functions.
+
+        Examples:
+
+            SUM(total_amount)                  -> True
+
+            COALESCE(SUM(total_amount), 0)     -> True
+
+            SUM(total_amount) + 10             -> True
+
+            customer_id + SUM(total_amount)    -> False
+        """
+
+        if not cls._expression_contains_aggregate(
+            expression
+        ):
+            return False
+
+        return not cls._get_non_aggregate_columns(
+            expression
+        )
+
+    # ------------------------------------------------------
+
+    @staticmethod
+    def _get_non_aggregate_columns(
+        expression,
+    ) -> list:
+        """
+        Return columns that are not located inside an
+        aggregate function.
+        """
+
+        columns = []
+
+        for column in expression.find_all(
+            exp.Column
+        ):
+
+            current = column.parent
+
+            inside_aggregate = False
+
+            while (
+                current is not None
+                and current is not expression.parent
+            ):
+
+                if isinstance(
+                    current,
+                    exp.AggFunc,
+                ):
+                    inside_aggregate = True
+                    break
+
+                if current is expression:
+                    break
+
+                current = getattr(
+                    current,
+                    "parent",
+                    None,
+                )
+
+            if not inside_aggregate:
+                columns.append(
+                    column
+                )
+
+        return columns
+
+    # ------------------------------------------------------
+
+    @staticmethod
+    def _expression_has_physical_column(
+        expression,
+    ) -> bool:
+        """
+        Return True when an expression references a column.
+        """
+
+        if isinstance(
+            expression,
+            exp.Column,
+        ):
+            return True
+
+        return (
+            expression.find(
+                exp.Column
+            )
+            is not None
+        )
+
+    # ------------------------------------------------------
+
+    @staticmethod
+    def _normalize_expression(
+        expression,
+    ) -> str:
+        """
+        Produce a stable representation for expression
+        comparison.
+        """
+
+        return (
+            expression.sql(
+                dialect="postgres"
+            )
+            .strip()
+            .lower()
+        )
 
     # ======================================================
     # SELECT ALIAS EXTRACTION
