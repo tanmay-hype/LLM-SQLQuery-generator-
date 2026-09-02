@@ -49,6 +49,9 @@ Do not include comments.
 Rules:
 
 - Use PostgreSQL syntax.
+- Prefer the simplest direct interpretation supported by the provided schema.
+- When the requested value is directly represented by a column on the requested entity's table, use that column instead of reconstructing the value through related tables, joins, or aggregation.
+- Add JOINs, GROUP BY, HAVING, or derived calculations only when they are necessary to answer the user's request.
 - Only use tables provided in the database schema.
 - Only use columns provided in the database schema.
 - Never invent tables, columns, relationships, or values.
