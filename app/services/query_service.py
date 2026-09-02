@@ -1,5 +1,7 @@
 import logging
 
+from sqlalchemy import schema
+
 from app.cache.base import BaseSQLCache
 from app.core.config import settings
 from app.core.database import engine
@@ -14,6 +16,7 @@ from app.llm.prompt_examples.retriever import ExampleRetriever
 
 from app.models import intent_analysis
 from app.models.response import SQLResponse
+from app.models.intent_analysis import IntentAnalysis
 
 from app.schema.compression.schema_compressor import SchemaCompressor
 
@@ -261,9 +264,27 @@ class QueryService:
         self._initialize_schema_index(
             documents
         )
+        
+        # --------------------------------------------------
+        # 4. Detect intent
+        # --------------------------------------------------
+
+        intent_analysis = self._detect_intent(
+            question
+        )
+
+        logger.info(
+            "Detected primary intent: %s",
+            intent_analysis.primary,
+        )
+
+        logger.info(
+            "Detected secondary intents: %s",
+            intent_analysis.secondary,
+        )
 
         # --------------------------------------------------
-        # 4. Resolve SQL cache context
+        # 5. Resolve SQL cache context
         # --------------------------------------------------
         
         schema_fingerprint = (self._get_schema_fingerprint())
@@ -284,6 +305,8 @@ class QueryService:
         
         cached_sql = self._get_cached_sql(
             cache_key=cache_key,
+            question=question,
+            intent=intent_analysis,
             full_schema=schema,
         )
         
@@ -302,24 +325,6 @@ class QueryService:
                 results=results,
             )
         
-        # --------------------------------------------------
-        # 5. Detect intent
-        # --------------------------------------------------
-
-        intent_analysis = self._detect_intent(
-            question
-        )
-
-        logger.info(
-            "Detected primary intent: %s",
-            intent_analysis.primary,
-        )
-
-        logger.info(
-            "Detected secondary intents: %s",
-            intent_analysis.secondary,
-        )
-
         # --------------------------------------------------
         # 6. Retrieve relevant schema
         # --------------------------------------------------
@@ -360,7 +365,7 @@ class QueryService:
         )
 
         # --------------------------------------------------
-        # 8. Retrieve few-shot examples
+        # 9. Retrieve few-shot examples
         # --------------------------------------------------
 
         examples = (
@@ -375,7 +380,7 @@ class QueryService:
         )
 
         # --------------------------------------------------
-        # 9. Build prompt
+        # 10. Build prompt
         # --------------------------------------------------
 
         prompt = self._build_prompt(
@@ -386,7 +391,7 @@ class QueryService:
         )
 
         # --------------------------------------------------
-        # 10-12. Generate, validate and correct SQL
+        # 11. Generate, validate and correct SQL
         # --------------------------------------------------
 
         validated_sql = (
@@ -400,7 +405,7 @@ class QueryService:
         )
         
         # --------------------------------------------------
-        # Store validated SQL
+        # 12. Store validated SQL
         # --------------------------------------------------
         
         self._store_cached_sql(
@@ -417,7 +422,7 @@ class QueryService:
         )
 
         # --------------------------------------------------
-        # 14. Return response
+        #  14. Return response
         # --------------------------------------------------
 
         logger.info(
@@ -607,6 +612,8 @@ class QueryService:
     def _get_cached_sql(
         self,
         cache_key: str | None,
+        question: str,
+        intent: IntentAnalysis,
         full_schema: dict,
     ) -> str | None:
         """
@@ -620,7 +627,7 @@ class QueryService:
             return None
         
         cached_sql = self.sql_cache.get(
-            cache_key
+            cache_key 
         )
         
         if cached_sql is None:
@@ -659,6 +666,46 @@ class QueryService:
             "Cached SQL passed structural validation."
         )
         
+        # ==================================================
+        # SEMANTIC VALIDATION
+        # ==================================================
+        
+        semantic_result = (
+            self.semantic_validator.validate(
+                question=question,
+                sql=validated_sql,
+                intent=intent,
+                schema=full_schema,
+            )
+        )
+
+        if not semantic_result.valid:
+
+            semantic_error = "\n".join(
+                semantic_result.errors
+            )
+
+            logger.warning(
+                "Cached SQL failed semantic validation: %s",
+                semantic_error,
+            )
+
+            deleted = self.sql_cache.delete(
+                cache_key
+            )
+
+            if deleted:
+                logger.info(
+                    "Deleted semantically invalid cached SQL "
+                    "from production cache."
+                )
+
+            return None
+
+        logger.info(
+            "Cached SQL passed semantic validation."
+        )
+
         return validated_sql
     
     def _store_cached_sql(
