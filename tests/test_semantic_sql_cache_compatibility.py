@@ -39,6 +39,24 @@ def make_entry(
 
 compatibility = SemanticSQLCacheCompatibility()
 
+TEST_SCHEMA = {
+    "customers": {
+        "columns": [
+            {"name": "id"},
+            {"name": "name"},
+            {"name": "email"},
+            {"name": "city"},
+        ],
+    },
+    "products": {
+        "columns": [
+            {"name": "id"},
+            {"name": "name"},
+            {"name": "category"},
+            {"name": "price"},
+        ],
+    },
+}
 
 def assert_compatible(
     cached_question,
@@ -46,6 +64,7 @@ def assert_compatible(
     *,
     primary=QueryIntent.LOOKUP,
     secondary=(),
+    schema=None,
 ):
     entry = make_entry(
         cached_question,
@@ -62,8 +81,8 @@ def assert_compatible(
         new_question,
         intent,
         entry,
+        schema=schema,
     )
-
 
 def assert_incompatible(
     cached_question,
@@ -73,6 +92,7 @@ def assert_incompatible(
     current_primary=QueryIntent.LOOKUP,
     cached_secondary=(),
     current_secondary=(),
+    schema=None,
 ):
     entry = make_entry(
         cached_question,
@@ -89,6 +109,7 @@ def assert_incompatible(
         new_question,
         intent,
         entry,
+        schema=schema,
     )
 
 
@@ -218,6 +239,126 @@ def test_different_quoted_literal_is_rejected():
     )
 
 
+def test_different_unquoted_categorical_value_rejected():
+    assert_incompatible(
+        "Show customers from Mumbai",
+        "Show customers from Delhi",
+    )
+
+def test_same_unquoted_categorical_value_is_compatible():
+    assert_compatible(
+        "Show customers from Mumbai",
+        "List customers from Mumbai",
+    )
+
+
+def test_same_in_categorical_value_is_compatible():
+    assert_compatible(
+        "Show customers in Delhi",
+        "List customers in Delhi",
+    )
+
+def test_different_category_value_is_rejected():
+    assert_incompatible(
+        "Show products in category Electronics",
+        "Show products in category Furniture",
+    )
+
+
+def test_same_category_value_is_compatible():
+    assert_compatible(
+        "Show products in category Electronics",
+        "List products in category Electronics",
+    )
+
+
+def test_different_multiword_location_is_rejected():
+    assert_incompatible(
+        "Show customers from New York",
+        "Show customers from San Francisco",
+    )
+
+
+def test_same_multiword_location_is_compatible():
+    assert_compatible(
+        "Show customers from New York",
+        "List customers from New York",
+    )
+
+def test_different_category_is_value_is_rejected():
+    assert_incompatible(
+        "Show products where category is Electronics",
+        "Show products where category is Furniture",
+    )
+
+
+def test_same_category_is_value_is_compatible():
+    assert_compatible(
+        "Show products where category is Electronics",
+        "List products where category is Electronics",
+    )
+
+def test_different_city_field_value_is_rejected():
+    assert_incompatible(
+        "Show customers where city is Mumbai",
+        "Show customers where city is Delhi",
+        schema=TEST_SCHEMA,
+    )
+
+
+def test_different_named_category_value_is_rejected():
+    assert_incompatible(
+        "Show products with category Electronics",
+        "Show products with category Furniture",
+    )
+
+
+def test_different_email_value_is_rejected():
+    assert_incompatible(
+        "Find customer with email alice@example.com",
+        "Find customer with email bob@example.com",
+        schema=TEST_SCHEMA,
+    )
+
+
+def test_different_product_name_is_rejected():
+    assert_incompatible(
+        "Find product named Laptop",
+        "Find product named Keyboard",
+        schema=TEST_SCHEMA,
+    )
+
+
+def test_different_multiword_product_name_is_rejected():
+    assert_incompatible(
+        "Find product named Gaming Laptop",
+        "Find product named Wireless Keyboard",
+        schema=TEST_SCHEMA,
+    )
+
+
+def test_different_city_equality_value_is_rejected():
+    assert_incompatible(
+        "Show customers with city Mumbai",
+        "Show customers with city Delhi",
+        schema=TEST_SCHEMA,
+    )
+def test_same_product_name_is_compatible():
+    assert_compatible(
+        "Find product named Laptop",
+        "Show product named Laptop",
+        schema=TEST_SCHEMA,
+    )
+
+
+def test_same_multiword_product_name_is_compatible():
+    assert_compatible(
+        "Find product named Gaming Laptop",
+        "Show product named Gaming Laptop",
+        schema=TEST_SCHEMA,
+    )
+
+
 def run():
     tests = [
         test_simple_paraphrase_is_compatible,
@@ -236,6 +377,23 @@ def run():
         test_secondary_intent_change_is_rejected,
         test_same_quoted_literal_is_compatible,
         test_different_quoted_literal_is_rejected,
+        test_different_unquoted_categorical_value_rejected,
+        test_same_unquoted_categorical_value_is_compatible,
+        test_same_in_categorical_value_is_compatible,
+        test_different_category_value_is_rejected,
+        test_same_category_value_is_compatible,
+        test_different_multiword_location_is_rejected,
+        test_same_multiword_location_is_compatible,
+        test_different_category_is_value_is_rejected,
+        test_same_category_is_value_is_compatible,
+        test_different_city_field_value_is_rejected,
+        test_different_named_category_value_is_rejected,
+        test_different_email_value_is_rejected,
+        test_different_product_name_is_rejected,
+        test_different_multiword_product_name_is_rejected,
+        test_different_city_equality_value_is_rejected,
+        test_same_product_name_is_compatible,
+        test_same_multiword_product_name_is_compatible,
     ]
 
     passed = 0

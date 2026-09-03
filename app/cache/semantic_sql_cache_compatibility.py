@@ -11,6 +11,7 @@ from app.models.intent_analysis import IntentAnalysis
 class QuestionSignature:
     numeric_literals: tuple[str, ...]
     quoted_literals: tuple[str, ...]
+    categorical_literals: tuple[str, ...]
 
     comparison: str | None
     ranking_direction: str | None
@@ -38,7 +39,22 @@ class SemanticSQLCacheCompatibility:
     _QUOTED_PATTERN = re.compile(
         r"""['"]([^'"]+)['"]"""
     )
-
+    
+    _CATEGORICAL_PATTERN = re.compile(
+        r"\b(?:"
+        r"(?:from|in)\s+(?!category\b)"
+        r"([a-z][a-z0-9_-]*)"
+        r"|"
+        r"(?:in\s+)?category(?:\s+is)?\s+"
+        r"([a-z][a-z0-9_-]*)"
+        r")\b",
+        re.IGNORECASE,
+    )
+    
+    _SCHEMA_COLUMN_ALIASES = {
+        "named": "name",
+    }
+    
     _NEGATION_PATTERN = re.compile(
         r"\b(?:not|isn't|aren't|wasn't|weren't|without|except)\b",
         re.IGNORECASE,
@@ -121,6 +137,7 @@ class SemanticSQLCacheCompatibility:
         question: str,
         intent: IntentAnalysis,
         entry: SemanticSQLCacheEntry,
+        schema: dict | None = None,
     ) -> bool:
         if not question.strip():
             return False
@@ -139,6 +156,11 @@ class SemanticSQLCacheCompatibility:
 
         if current.quoted_literals != cached.quoted_literals:
             return False
+        
+        if( 
+           current.categorical_literals != cached.categorical_literals
+        ):
+           return False
 
         if current.comparison != cached.comparison:
             return False
@@ -154,6 +176,14 @@ class SemanticSQLCacheCompatibility:
 
         if current.has_between != cached.has_between:
             return False
+        
+        if schema is not None:
+            if not self._schema_values_compatible(
+                current_question = question,
+                cached_question = entry.question,
+                schema = schema,
+            ):
+                return False
 
         return True
 
@@ -170,6 +200,9 @@ class SemanticSQLCacheCompatibility:
             quoted_literals=self._extract_quoted_literals(
                 normalized
             ),
+            categorical_literals=self._extract_categorical_literals(
+                normalized
+            ),
             comparison=self._extract_comparison(normalized),
             ranking_direction=self._extract_ranking_direction(
                 normalized
@@ -184,6 +217,127 @@ class SemanticSQLCacheCompatibility:
                 self._BETWEEN_PATTERN.search(normalized)
             ),
         )
+    
+    def _schema_values_compatible(
+        self,
+        *,
+        current_question: str,
+        cached_question: str,
+        schema: dict,
+    ) -> bool:
+        """
+        Check if the schema values in the current and cached questions are compatible.
+        """
+        current_values = self._extract_schema_values(
+            current_question,
+            schema,
+        )
+
+        cached_values = self._extract_schema_values(
+            cached_question,
+            schema,
+        )
+
+        return current_values == cached_values
+
+
+    def _extract_schema_values(
+        self,
+        question: str,
+        schema: dict,
+    ) -> tuple[tuple[str, str], ...]:
+        """
+        Extract schema values from a question.
+        """
+        normalized = self._normalize(question)
+
+        column_names = self._schema_column_names(schema)
+
+        values: list[tuple[str, str]] = []
+
+        for column_name in column_names:
+            escaped_column = re.escape(column_name)
+
+            patterns = (
+                re.compile(
+                    rf"\b{escaped_column}\s+is\s+"
+                    rf"([^\s,?.]+)",
+                    re.IGNORECASE,
+                ),
+                re.compile(
+                    rf"\b(?:with|where)\s+"
+                    rf"{escaped_column}\s+"
+                    rf"([^\s,?.]+)",
+                    re.IGNORECASE,
+                ),
+            )
+
+            for pattern in patterns:
+                match = pattern.search(normalized)
+
+                if match is None:
+                    continue
+
+                value = match.group(1).strip().lower()
+
+                if value:
+                    values.append(
+                       (
+                           column_name,
+                           value,
+                        )
+                  )
+
+                break
+        for alias, column_name in (
+            self._SCHEMA_COLUMN_ALIASES.items()
+        ):
+            if column_name not in column_names:
+               continue
+
+            pattern = re.compile(
+               rf"\b{re.escape(alias)}\s+"
+               rf"(.+?)(?=$|\s+(?:with|where|and|or)\b)",
+               re.IGNORECASE,
+            )
+
+            match = pattern.search(normalized)
+
+            if match is None:
+               continue
+
+            value = match.group(1).strip().lower()
+
+            if value:
+                values.append(
+                   (
+                       column_name,
+                       value,
+                    )
+                )
+
+        return tuple(sorted(values))
+
+
+    @staticmethod
+    def _schema_column_names(
+        schema: dict,
+    ) -> tuple[str, ...]:
+        names: set[str] = set()
+
+        for table_data in schema.values():
+            for column in table_data.get(
+                "columns",
+                [],
+            ):
+                name = column.get("name")
+
+                if isinstance(name, str) and name.strip():
+                    names.add(
+                        name.strip().lower()
+                    )
+
+        return tuple(sorted(names))
 
     @staticmethod
     def _normalize(question: str) -> str:
@@ -207,6 +361,30 @@ class SemanticSQLCacheCompatibility:
             value.strip().lower()
             for value in self._QUOTED_PATTERN.findall(question)
         )
+    
+    def _extract_categorical_literals(
+        self,
+        question: str,
+    ) -> tuple[str, ...]:
+        values = []
+        
+        for match in self._CATEGORICAL_PATTERN.findall(
+            question
+        ):
+            value = next(
+                (
+                    item
+                    for item in match 
+                    if item 
+                ),
+                None,
+            )
+            
+            if value is not None:
+                values.append(value.strip().lower()
+                )
+
+        return tuple(values)
 
     def _extract_comparison(
         self,

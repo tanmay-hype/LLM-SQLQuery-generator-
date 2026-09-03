@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from sqlalchemy import schema
+
 from app.cache.semantic_cache_entry import SemanticSQLCacheEntry
 from app.cache.semantic_sql_cache import SemanticSQLCache
 from app.cache.semantic_sql_cache_compatibility import (
@@ -75,6 +77,7 @@ class SemanticSQLCacheService:
             question,
             intent,
             entry,
+            schema = schema,
         ):
             return None
 

@@ -800,6 +800,7 @@ class QueryService:
         result = self.semantic_sql_cache_service.lookup(
             question=question,
             intent=intent,
+            schema = full_schema,
             schema_fingerprint=schema_fingerprint,
             provider=provider,
             model=model,
