@@ -1,4 +1,6 @@
 from functools import lru_cache
+
+from app.cache.semantic_sql_cache import SemanticSQLCache
 from app.cache.sql_cache import SQLCache
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -16,6 +18,16 @@ def get_sql_cache() -> SQLCache:
     return SQLCache(
         max_size=settings.sql_cache_size
     )
+
+@lru_cache(maxsize=1)
+def get_semantic_sql_cache() -> SemanticSQLCache:
+    return SemanticSQLCache(
+        max_size=settings.semantic_sql_cache_size,
+        similarity_threshold=(
+            settings.semantic_sql_cache_similarity_threshold
+        ),
+    )
+
     
 def get_query_service() -> QueryService:
     """
@@ -37,6 +49,7 @@ def get_query_service() -> QueryService:
     """
     return QueryService(
         sql_cache=get_sql_cache(),
+        semantic_sql_cache=get_semantic_sql_cache(),
     )
 
 

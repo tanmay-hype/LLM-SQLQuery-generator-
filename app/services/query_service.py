@@ -20,6 +20,11 @@ from app.models.intent_analysis import IntentAnalysis
 
 from app.schema.compression.schema_compressor import SchemaCompressor
 
+from app.cache.semantic_sql_cache import SemanticSQLCache
+from app.cache.semantic_sql_cache_service import (
+    SemanticSQLCacheService,
+)
+
 from app.schema.embeddings.gemini_embedding_service import (
     GeminiEmbeddingService,
 )
@@ -98,7 +103,7 @@ class QueryService:
         SQLResponse
     """
 
-    def __init__(self, db_engine=engine, sql_cache: BaseSQLCache | None = None,):
+    def __init__(self, db_engine=engine, sql_cache: BaseSQLCache | None = None, semantic_sql_cache: SemanticSQLCache | None = None,):
         """
         Initialize all dependencies required by the SQL pipeline.
 
@@ -115,6 +120,8 @@ class QueryService:
         # ==================================================
 
         self.sql_cache = sql_cache
+        
+        self.semantic_sql_cache = semantic_sql_cache
 
         # ==================================================
         # DATABASE / SCHEMA
@@ -136,6 +143,15 @@ class QueryService:
 
         self.embedding_service = (
             GeminiEmbeddingService()
+        )
+        
+        self.semantic_sql_cache_service = (
+            SemanticSQLCacheService(
+               cache=self.semantic_sql_cache,
+               embedding_service=self.embedding_service,
+            )
+            if self.semantic_sql_cache is not None
+            else None
         )
 
         # ==================================================
@@ -330,6 +346,44 @@ class QueryService:
             )
         
         # --------------------------------------------------
+        # 6. Try semantic SQL cache
+        # --------------------------------------------------
+
+        semantic_cached_sql = (
+            self._get_semantic_cached_sql(
+                question=question,
+                intent=intent_analysis,
+                full_schema=schema,
+                schema_fingerprint=schema_fingerprint,
+                provider=llm_provider,
+                model=llm_model,
+            )
+        )
+        if semantic_cached_sql is not None:
+
+            # Promote the semantic hit into L1 so an identical
+            # future request can use the cheaper exact cache.
+            self._store_cached_sql(
+                cache_key=cache_key,
+                sql=semantic_cached_sql,
+            )
+
+            results = self._execute_sql(
+                semantic_cached_sql
+            )
+
+            logger.info(
+                "SQL generation pipeline completed "
+                "successfully (semantic cache hit)."
+            )
+
+            return SQLResponse(
+                sql=semantic_cached_sql,
+                results=results,
+            )
+        
+        
+        # --------------------------------------------------
         # 6. Retrieve relevant schema
         # --------------------------------------------------
 
@@ -414,6 +468,16 @@ class QueryService:
         
         self._store_cached_sql(
             cache_key=cache_key,
+            sql=validated_sql,
+        )
+        
+        
+        self._store_semantic_cached_sql(
+            question=question,
+            intent=intent_analysis,
+            schema_fingerprint=schema_fingerprint,
+            provider=llm_provider,
+            model=llm_model,
             sql=validated_sql,
         )
         
@@ -712,6 +776,97 @@ class QueryService:
 
         return validated_sql
     
+    
+    def _get_semantic_cached_sql(
+        self,
+        *,
+        question: str,
+        intent: IntentAnalysis,
+        full_schema: dict,
+        schema_fingerprint: str,
+        provider: str,
+        model: str,
+    ) -> str | None:
+        """
+        Retrieve cached SQL from the semantic cache, if available and valid.
+        """
+
+        if (
+            not settings.semantic_sql_cache_enabled
+            or self.semantic_sql_cache_service is None
+        ):
+            return None
+
+        result = self.semantic_sql_cache_service.lookup(
+            question=question,
+            intent=intent,
+            schema_fingerprint=schema_fingerprint,
+            provider=provider,
+            model=model,
+            cache_version=settings.sql_cache_version,
+        )
+
+        if result is None:
+            logger.info(
+                "Semantic SQL cache miss."
+            )
+            return None
+
+        entry, score = result
+
+        logger.info(
+            "Semantic SQL cache candidate hit "
+            "with similarity %.4f.",
+            score,
+        )
+
+        try:
+            validated_sql = self.sql_validator.validate(
+                entry.sql,
+                full_schema,
+            )
+        except SQLValidationError as exc:
+            logger.warning(
+                "Semantic cached SQL failed structural "
+                "validation: %s",
+                exc,
+            )
+
+            self.semantic_sql_cache_service.delete(
+                entry
+            )
+
+            return None
+
+        semantic_result = (
+            self.semantic_validator.validate(
+                question=question,
+                sql=validated_sql,
+                intent=intent,
+                schema=full_schema,
+            )
+        )
+
+        if not semantic_result.valid:
+            logger.warning(
+                "Semantic cached SQL failed semantic "
+                "validation: %s",
+                "\n".join(semantic_result.errors),
+            )
+
+            self.semantic_sql_cache_service.delete(
+                entry
+            )
+
+            return None
+
+        logger.info(
+            "Semantic cached SQL passed structural "
+            "and semantic validation."
+        )
+
+        return validated_sql
+    
     def _store_cached_sql(
         self,
         cache_key: str | None,
@@ -736,6 +891,39 @@ class QueryService:
             "Stored validated SQL in production cache."
         )
         
+    def _store_semantic_cached_sql(
+        self,
+        *,
+        question: str,
+        intent: IntentAnalysis,
+        schema_fingerprint: str,
+        provider: str,
+        model: str,
+        sql: str,
+    ) -> None:
+        """
+        Store the validated SQL in the semantic cache.
+        """
+
+        if (
+            not settings.semantic_sql_cache_enabled
+            or self.semantic_sql_cache_service is None
+        ):
+            return
+
+        self.semantic_sql_cache_service.store(
+            question=question,
+            intent=intent,
+            schema_fingerprint=schema_fingerprint,
+            provider=provider,
+            model=model,
+            sql=sql,
+            cache_version=settings.sql_cache_version,
+        )
+        
+        logger.info(
+            "Stored validated SQL in semantic cache."
+        )
 
     def _detect_intent(
         self,
@@ -1162,3 +1350,4 @@ class QueryService:
         logger.info(
             "Schema vector index rebuilt successfully."
         )
+    

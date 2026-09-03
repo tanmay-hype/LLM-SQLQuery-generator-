@@ -126,7 +126,18 @@ class Settings(BaseSettings):
     # Maximum allowed score difference from the strongest
     # semantic retrieval match.
     schema_semantic_max_score_gap: float = 0.10
-
+    
+    # ==================================================
+    # Schema Retrieval
+    # ==================================================
+    
+    semantic_sql_cache_enabled: bool = True
+    
+    semantic_sql_cache_size: int = 256
+    
+    semantic_sql_cache_similarity_threshold: float = 0.95
+    
+    
     # ==================================================
     # Example Retrieval
     # ==================================================
