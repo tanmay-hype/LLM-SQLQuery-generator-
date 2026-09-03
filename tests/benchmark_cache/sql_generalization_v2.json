@@ -1,0 +1,162 @@
+{
+    "1": {
+        "question": "Give me the names of everyone in the customer list",
+        "sql": "SELECT\n  name\nFROM customers;"
+    },
+    "10": {
+        "question": "List customers who are not from Delhi",
+        "sql": "SELECT\n  *\nFROM customers\nWHERE\n  city <> 'Delhi';"
+    },
+    "11": {
+        "question": "How many products are in each category?",
+        "sql": "SELECT\n  category,\n  COUNT(*) AS product_count\nFROM products\nGROUP BY\n  category\nORDER BY\n  product_count DESC;"
+    },
+    "12": {
+        "question": "What is the average product price by category?",
+        "sql": "SELECT\n  category,\n  AVG(price)\nFROM products\nGROUP BY\n  category;"
+    },
+    "13": {
+        "question": "How many orders has each customer placed?",
+        "sql": "SELECT\n  c.name,\n  COUNT(o.id) AS order_count\nFROM customers AS c\nJOIN orders AS o\n  ON c.id = o.customer_id\nGROUP BY\n  c.id,\n  c.name\nORDER BY\n  order_count DESC;"
+    },
+    "14": {
+        "question": "What quantity of each product has been sold?",
+        "sql": "SELECT\n  p.name,\n  SUM(oi.quantity) AS total_quantity_sold\nFROM products AS p\nJOIN order_items AS oi\n  ON p.id = oi.product_id\nGROUP BY\n  p.name;"
+    },
+    "15": {
+        "question": "What is the average amount spent per order by each customer?",
+        "sql": "SELECT\n  c.name,\n  AVG(o.total_amount) AS average_order_amount\nFROM customers AS c\nJOIN orders AS o\n  ON c.id = o.customer_id\nGROUP BY\n  c.id,\n  c.name;"
+    },
+    "16": {
+        "question": "Which customer has spent the most money?",
+        "sql": "SELECT\n  c.name\nFROM customers AS c\nJOIN orders AS o\n  ON c.id = o.customer_id\nGROUP BY\n  c.id\nORDER BY\n  SUM(o.total_amount) DESC\nLIMIT 1;"
+    },
+    "17": {
+        "question": "Which product has sold the greatest quantity?",
+        "sql": "SELECT\n  p.name\nFROM order_items AS oi\nJOIN products AS p\n  ON oi.product_id = p.id\nGROUP BY\n  p.name\nORDER BY\n  SUM(oi.quantity) DESC\nLIMIT 1;"
+    },
+    "18": {
+        "question": "Show the 5 cheapest products",
+        "sql": "SELECT\n  *\nFROM products\nORDER BY\n  price ASC\nLIMIT 5;"
+    },
+    "19": {
+        "question": "Show the 2 most expensive Electronics products",
+        "sql": "SELECT\n  *\nFROM products\nWHERE\n  category = 'Electronics'\nORDER BY\n  price DESC\nLIMIT 2;"
+    },
+    "2": {
+        "question": "What items do we currently sell?",
+        "sql": "SELECT\n  name\nFROM products;"
+    },
+    "20": {
+        "question": "Show each customer together with every product they ordered",
+        "sql": "SELECT DISTINCT\n    c.name,\n    p.name\nFROM customers AS c\nJOIN orders AS o\n    ON c.id = o.customer_id\nJOIN order_items AS oi\n    ON o.id = oi.order_id\nJOIN products AS p\n    ON oi.product_id = p.id\nORDER BY\n    c.name,\n    p.name;"
+    },
+    "21": {
+        "question": "How many different products has each customer purchased?",
+        "sql": "SELECT\n  c.name,\n  COUNT(DISTINCT oi.product_id) AS distinct_products_purchased\nFROM customers AS c\nJOIN orders AS o\n  ON c.id = o.customer_id\nJOIN order_items AS oi\n  ON o.id = oi.order_id\nGROUP BY\n  c.id,\n  c.name\nORDER BY\n  distinct_products_purchased DESC;"
+    },
+    "22": {
+        "question": "How much revenue has each product generated?",
+        "sql": "SELECT\n  p.name,\n  SUM(oi.quantity * oi.unit_price) AS total_revenue\nFROM products AS p\nJOIN order_items AS oi\n  ON p.id = oi.product_id\nGROUP BY\n  p.id,\n  p.name\nORDER BY\n  total_revenue DESC;"
+    },
+    "23": {
+        "question": "Show the total quantity purchased by each customer",
+        "sql": "SELECT\n  c.name,\n  SUM(oi.quantity) AS total_quantity\nFROM customers AS c\nJOIN orders AS o\n  ON c.id = o.customer_id\nJOIN order_items AS oi\n  ON o.id = oi.order_id\nGROUP BY\n  c.id,\n  c.name\nORDER BY\n  total_quantity DESC;"
+    },
+    "24": {
+        "question": "How many orders were placed each month?",
+        "sql": "SELECT\n  DATE_TRUNC('month', order_date) AS month,\n  COUNT(id) AS order_count\nFROM orders\nGROUP BY\n  month\nORDER BY\n  month;"
+    },
+    "25": {
+        "question": "Show total order revenue for each day",
+        "sql": "SELECT\n  DATE_TRUNC('day', order_date) AS day,\n  SUM(total_amount) AS total_revenue\nFROM orders\nGROUP BY\n  day\nORDER BY\n  day;"
+    },
+    "26": {
+        "question": "Show orders placed after January 1, 2025",
+        "sql": "SELECT\n  *\nFROM\n  orders\nWHERE\n  order_date > '2025-01-01';"
+    },
+    "27": {
+        "question": "Show the most recent 5 orders",
+        "sql": "SELECT\n  *\nFROM\n  orders\nORDER BY\n  order_date DESC\nLIMIT 5;"
+    },
+    "28": {
+        "question": "Show the top 3 products by total sales revenue",
+        "sql": "SELECT\n  p.name,\n  SUM(oi.quantity * oi.unit_price) AS total_revenue\nFROM products AS p\nJOIN order_items AS oi\n  ON p.id = oi.product_id\nGROUP BY\n  p.id,\n  p.name\nORDER BY\n  total_revenue DESC\nLIMIT 3;"
+    },
+    "29": {
+        "question": "Show the top 5 customers by total quantity purchased",
+        "sql": "SELECT\n  c.name,\n  SUM(oi.quantity) AS total_quantity_purchased\nFROM customers AS c\nJOIN orders AS o\n  ON c.id = o.customer_id\nJOIN order_items AS oi\n  ON o.id = oi.order_id\nGROUP BY\n  c.id,\n  c.name\nORDER BY\n  total_quantity_purchased DESC\nLIMIT 5;"
+    },
+    "3": {
+        "question": "Give me every purchase order in the system",
+        "sql": "SELECT\n  *\nFROM\n  orders;"
+    },
+    "30": {
+        "question": "Show total spending by customer from highest to lowest",
+        "sql": "SELECT\n  c.name,\n  SUM(o.total_amount) AS total_spending\nFROM customers AS c\nJOIN orders AS o\n  ON c.id = o.customer_id\nGROUP BY\n  c.id,\n  c.name\nORDER BY\n  total_spending DESC;"
+    },
+    "31": {
+        "question": "Show monthly revenue ordered from newest month to oldest",
+        "sql": "SELECT\n  DATE_TRUNC('month', order_date) AS month,\n  SUM(total_amount) AS revenue\nFROM orders\nGROUP BY\n  month\nORDER BY\n  month DESC;"
+    },
+    "32": {
+        "question": "Show totals",
+        "sql": "SELECT 'Insufficient information';"
+    },
+    "33": {
+        "question": "Show activity",
+        "sql": "SELECT 'Insufficient information';"
+    },
+    "34": {
+        "question": "Show the best customers",
+        "sql": "SELECT 'Insufficient information';"
+    },
+    "35": {
+        "question": "Show customer phone numbers and addresses",
+        "sql": "SELECT 'Insufficient information';"
+    },
+    "36": {
+        "question": "Which supplier provides each product?",
+        "sql": "SELECT 'Insufficient information';"
+    },
+    "37": {
+        "question": "Show payment methods used for each order",
+        "sql": "SELECT 'Insufficient information';"
+    },
+    "38": {
+        "question": "Show customers with their loyalty points",
+        "sql": "SELECT 'Insufficient information';"
+    },
+    "39": {
+        "question": "List orders and their shipping status",
+        "sql": "SELECT 'Insufficient information';"
+    },
+    "4": {
+        "question": "Who are our buyers?",
+        "sql": "SELECT\n  name\nFROM\n  customers;"
+    },
+    "40": {
+        "question": "Show product inventory levels by warehouse",
+        "sql": "SELECT 'Insufficient information';"
+    },
+    "5": {
+        "question": "What does each product cost?",
+        "sql": "SELECT\n  name,\n  price\nFROM products;"
+    },
+    "6": {
+        "question": "Show customers from Mumbai",
+        "sql": "SELECT\n  *\nFROM\n  customers\nWHERE\n  city = 'Mumbai';"
+    },
+    "7": {
+        "question": "Show Electronics products costing more than 1000",
+        "sql": "SELECT\n  *\nFROM\n  products\nWHERE\n  category = 'Electronics' AND price > 1000;"
+    },
+    "8": {
+        "question": "Find products priced between 500 and 2000",
+        "sql": "SELECT\n  *\nFROM\n  products\nWHERE\n  price BETWEEN 500 AND 2000;"
+    },
+    "9": {
+        "question": "Show orders with a total amount greater than 5000",
+        "sql": "SELECT\n  *\nFROM\n  orders\nWHERE\n  total_amount > 5000;"
+    }
+}

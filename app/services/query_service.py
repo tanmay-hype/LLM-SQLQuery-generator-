@@ -277,14 +277,6 @@ class QueryService:
             question
         )
         
-        print("\n========== INTENT DEBUG ==========")
-        print("QUESTION:", question)
-        print("PRIMARY:", intent_analysis.primary)
-        print("SECONDARY:", intent_analysis.secondary)
-        print("SCORES:", intent_analysis.scores)
-        print("CONFIDENCE:", intent_analysis.confidence)
-        print("==================================\n")
-
         logger.info(
             "Detected primary intent: %s",
             intent_analysis.primary,
