@@ -62,6 +62,11 @@ class SemanticSQLCache:
     def search(
         self,
         embedding: tuple[float, ...],
+        *,
+        schema_fingerprint: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        cache_version: str | None = None,
     ) -> tuple[SemanticSQLCacheEntry, float] | None:
         self._validate_embedding(embedding)
 
@@ -71,6 +76,26 @@ class SemanticSQLCache:
 
             for entry in self._entries:
                 if len(entry.embedding) != len(embedding):
+                    continue
+                
+                if (schema_fingerprint is not None 
+                    and entry.schema_fingerprint != schema_fingerprint):
+                    
+                    continue
+
+                if (provider is not None 
+                    and entry.provider.lower() != provider.lower()):
+                    
+                    continue
+
+                if (model is not None 
+                    and entry.model.lower() != model.lower()):
+                    
+                    continue
+
+                if (cache_version is not None 
+                    and entry.cache_version.lower() != cache_version.lower()):
+                    
                     continue
 
                 score = self._cosine_similarity(

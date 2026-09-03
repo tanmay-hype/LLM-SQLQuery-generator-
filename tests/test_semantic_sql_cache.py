@@ -231,6 +231,131 @@ def test_invalid_zero_vector_rejected():
         raise AssertionError(
             "Expected zero vector to raise ValueError"
         )
+        
+def test_matching_metadata_returns_candidate():
+    cache = SemanticSQLCache(
+        similarity_threshold=0.95,
+    )
+
+    entry = make_entry(
+        "show customers",
+        (1.0, 0.0),
+    )
+
+    cache.add(entry)
+
+    result = cache.search(
+        (1.0, 0.0),
+        schema_fingerprint="schema-v1",
+        provider="gemini",
+        model="gemini-test",
+        cache_version="v1",
+    )
+
+    assert result is not None
+    assert result[0] == entry
+
+
+def test_schema_mismatch_is_rejected():
+    cache = SemanticSQLCache(
+        similarity_threshold=0.95,
+    )
+
+    cache.add(
+        make_entry(
+            "show customers",
+            (1.0, 0.0),
+        )
+    )
+
+    result = cache.search(
+        (1.0, 0.0),
+        schema_fingerprint="schema-v2",
+    )
+
+    assert result is None
+
+
+def test_provider_mismatch_is_rejected():
+    cache = SemanticSQLCache(
+        similarity_threshold=0.95,
+    )
+
+    cache.add(
+        make_entry(
+            "show customers",
+            (1.0, 0.0),
+        )
+    )
+
+    result = cache.search(
+        (1.0, 0.0),
+        provider="openai",
+    )
+
+    assert result is None
+
+
+def test_model_mismatch_is_rejected():
+    cache = SemanticSQLCache(
+        similarity_threshold=0.95,
+    )
+
+    cache.add(
+        make_entry(
+            "show customers",
+            (1.0, 0.0),
+        )
+    )
+
+    result = cache.search(
+        (1.0, 0.0),
+        model="different-model",
+    )
+
+    assert result is None
+
+
+def test_cache_version_mismatch_is_rejected():
+    cache = SemanticSQLCache(
+        similarity_threshold=0.95,
+    )
+
+    cache.add(
+        make_entry(
+            "show customers",
+            (1.0, 0.0),
+        )
+    )
+
+    result = cache.search(
+        (1.0, 0.0),
+        cache_version="v2",
+    )
+
+    assert result is None
+
+
+def test_metadata_matching_is_case_insensitive():
+    cache = SemanticSQLCache(
+        similarity_threshold=0.95,
+    )
+
+    cache.add(
+        make_entry(
+            "show customers",
+            (1.0, 0.0),
+        )
+    )
+
+    result = cache.search(
+        (1.0, 0.0),
+        provider="GEMINI",
+        model="GEMINI-TEST",
+        cache_version="V1",
+    )
+
+    assert result is not None
 
 
 def run():
