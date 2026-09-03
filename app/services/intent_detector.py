@@ -123,7 +123,6 @@ class IntentDetector:
     }
 
     JOIN_KEYWORDS = {
-        "with": 2,
         "along": 2,
         "including": 3,
         "associated": 3,
@@ -198,10 +197,25 @@ class IntentDetector:
         r"\bsales\s+(?:amount|value|activity)\b",
         r"\brevenue\b",
         r"\bspending\b",
+        r"\bhow\s+much\b",
+        r"\bhow\s+many\b",
+        r"\bhow\s+often\b",
         r"\bspent\b",
         r"\bpurchase\s+value\b",
         r"\btransaction\s+value\b",
         r"\bnumber\s+of\b",
+    )
+    
+    FILTER_COMPARISON_PATTERNS = (
+        r"\bgreater\s+than\b",
+        r"\bless\s+than\b",
+        r"\bat\s+least\b",
+        r"\bat\s+most\b",
+        r"\bmore\s+than\b",
+        r"\bfewer\s+than\b",
+        r"\bbetween\b",
+        r"\bequal\s+to\b",
+        r"\bnot\s+equal\s+to\b",
     )
 
     SORT_PATTERNS = (
@@ -213,6 +227,8 @@ class IntentDetector:
         r"\bsmallest\s+\w+",
         r"\blowest\s+\w+",
     )
+    
+    
 
     # ======================================================
     # INTENT PRIORITY
@@ -431,6 +447,59 @@ class IntentDetector:
                 QueryIntent.SORT
             ] += 4
 
+        
+        
+        # --------------------------------------------------
+        # Stored-metric filter disambiguation
+        # --------------------------------------------------
+        #
+        # Phrases such as:
+        #
+        #   "orders with a total amount greater than 5000"
+        #
+        # may describe filtering an existing metric column
+        # rather than computing an aggregate.
+        #
+        # When comparison language is present and there is no
+        # grouping language, explicit aggregate function, or
+        # per-entity aggregation structure, suppress weak
+        # business-metric aggregation evidence.
+        # --------------------------------------------------#
+
+        has_filter_comparison = (
+            self._matches_any_pattern(
+                question,
+                self.FILTER_COMPARISON_PATTERNS,
+            )
+        )
+
+        has_grouping = (
+            scores[QueryIntent.GROUP_BY] > 0
+        )
+
+        has_explicit_aggregate = bool(
+            tokens
+            & {
+                "sum",
+                "average",
+                "avg",
+                "count",
+                "maximum",
+                "minimum",
+                "max",
+                "min",
+            }
+        )
+
+        if (
+            has_filter_comparison
+            and not has_grouping
+            and not has_explicit_aggregate
+        ):
+            scores[
+                QueryIntent.AGGREGATION
+            ] = 0
+            
         return scores
 
     # ======================================================

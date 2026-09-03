@@ -268,10 +268,22 @@ class QueryService:
         # --------------------------------------------------
         # 4. Detect intent
         # --------------------------------------------------
+        # This is a critical step in the pipeline.
+        # The detected intent will guide the rest of the
+        # SQL generation process.
+        # --------------------------------------------------
 
         intent_analysis = self._detect_intent(
             question
         )
+        
+        print("\n========== INTENT DEBUG ==========")
+        print("QUESTION:", question)
+        print("PRIMARY:", intent_analysis.primary)
+        print("SECONDARY:", intent_analysis.secondary)
+        print("SCORES:", intent_analysis.scores)
+        print("CONFIDENCE:", intent_analysis.confidence)
+        print("==================================\n")
 
         logger.info(
             "Detected primary intent: %s",

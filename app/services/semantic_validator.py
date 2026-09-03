@@ -471,16 +471,20 @@ class SemanticValidator:
         """
 
         errors: list[str] = []
+        
+        
+        # --------------------------------------------------
+        # Aggregation requirement comes from the semantic
+        # contract built from IntentAnalysis.
+        #
+        # Do not independently infer aggregation again from
+        # raw question tokens here. That can contradict the
+        # disambiguated intent produced by IntentDetector.
+        # --------------------------------------------------
+        
 
-        aggregation_requested = bool(
-            question_tokens
-            & self.AGGREGATION_REQUEST_TOKENS
-        )
-
-        if (
-            not contract.requires_aggregation
-            and not aggregation_requested
-        ):
+        if not contract.requires_aggregation:
+            
             return errors
 
         has_aggregate = self._has_aggregate(
