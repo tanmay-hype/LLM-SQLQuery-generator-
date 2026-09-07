@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.connections import router as connections_router
 from app.api.routes import router
 from app.core.logging import configure_logging
 from app.exceptions.handlers import register_exception_handlers
@@ -14,5 +15,5 @@ app = FastAPI(
 
 register_exception_handlers(app)
 
-
 app.include_router(router)
+app.include_router(connections_router)
