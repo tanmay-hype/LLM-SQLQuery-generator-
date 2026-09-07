@@ -27,7 +27,9 @@ function App() {
           setIsConnectDialogOpen(true)
         }
       >
-        <QueryWorkspace />
+        <QueryWorkspace
+          connection={connection}
+        />
       </AppShell>
 
       <ConnectDatabaseDialog
