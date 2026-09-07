@@ -60,3 +60,10 @@ class DatabaseConnectionTestResponse(BaseModel):
     message: str
     database: str | None = None
     server_version: str | None = None
+    
+class DatabaseConnectionCreateResponse(
+    BaseModel
+):
+    connection_id: str
+    database: str
+    server_version: str

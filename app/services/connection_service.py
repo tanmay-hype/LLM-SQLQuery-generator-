@@ -12,7 +12,7 @@ class DatabaseConnectionService:
         self,
         request: DatabaseConnectionTestRequest,
     ) -> DatabaseConnectionTestResponse:
-        database_url = self._build_database_url(
+        database_url = self.build_database_url(
             request
         )
 
@@ -54,7 +54,7 @@ class DatabaseConnectionService:
         finally:
             engine.dispose()
 
-    def _build_database_url(
+    def build_database_url(
         self,
         request: DatabaseConnectionTestRequest,
     ):
