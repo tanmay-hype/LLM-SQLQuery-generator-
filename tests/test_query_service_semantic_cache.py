@@ -852,6 +852,152 @@ def test_invalid_semantic_cached_sql_is_deleted_and_falls_back():
 
     assert entry.sql == generated_sql
     assert entry.sql != bad_sql
+
+def test_different_city_value_rejects_semantic_cache():
+    service = build_service()
+
+    intent = make_intent()
+
+    schema = {
+        "customers": {
+            "columns": [
+                {"name": "id"},
+                {"name": "name"},
+                {"name": "city"},
+            ],
+            "primary_keys": {
+                "constrained_columns": ["id"],
+            },
+            "foreign_keys": [],
+        }
+    }
+
+    fingerprint = "schema-v1"
+    provider = "gemini"
+    model = "test-model"
+
+    cached_sql = (
+        "SELECT id, name, city "
+        "FROM customers "
+        "WHERE city = 'Mumbai';"
+    )
+
+    generated_sql = (
+        "SELECT id, name, city "
+        "FROM customers "
+        "WHERE city = 'Delhi';"
+    )
+
+    # Both questions intentionally receive the same fake
+    # embedding. The compatibility guard must therefore
+    # reject reuse based on the changed schema value.
+    service.semantic_sql_cache_service.store(
+        question=(
+            "Show customers where city is Mumbai"
+        ),
+        sql=cached_sql,
+        intent=intent,
+        schema_fingerprint=fingerprint,
+        provider=provider,
+        model=model,
+        cache_version="v1",
+    )
+
+    counters = install_fallback_pipeline(
+        service,
+        schema=schema,
+        intent=intent,
+        schema_fingerprint=fingerprint,
+        provider=provider,
+        model=model,
+        generated_sql=generated_sql,
+    )
+
+    response = service.generate_sql(
+        "Show customers where city is Delhi"
+    )
+
+    assert response.sql == generated_sql
+
+    assert counters["retrieval"] == 1
+    assert counters["generation"] == 1
+    assert counters["execution"] == 1
+
+    # A rejected L2 candidate must never reach the SQL
+    # validators as a cache hit.
+    assert service.sql_validator.calls == 0
+    assert service.semantic_validator.calls == 0
+
+
+def test_different_named_product_rejects_semantic_cache():
+    service = build_service()
+
+    intent = make_intent()
+
+    schema = {
+        "products": {
+            "columns": [
+                {"name": "id"},
+                {"name": "name"},
+                {"name": "price"},
+            ],
+            "primary_keys": {
+                "constrained_columns": ["id"],
+            },
+            "foreign_keys": [],
+        }
+    }
+
+    fingerprint = "schema-v1"
+    provider = "gemini"
+    model = "test-model"
+
+    cached_sql = (
+        "SELECT id, name, price "
+        "FROM products "
+        "WHERE name = 'Laptop';"
+    )
+
+    generated_sql = (
+        "SELECT id, name, price "
+        "FROM products "
+        "WHERE name = 'Keyboard';"
+    )
+
+    service.semantic_sql_cache_service.store(
+        question="Find product named Laptop",
+        sql=cached_sql,
+        intent=intent,
+        schema_fingerprint=fingerprint,
+        provider=provider,
+        model=model,
+        cache_version="v1",
+    )
+
+    counters = install_fallback_pipeline(
+        service,
+        schema=schema,
+        intent=intent,
+        schema_fingerprint=fingerprint,
+        provider=provider,
+        model=model,
+        generated_sql=generated_sql,
+    )
+
+    response = service.generate_sql(
+        "Find product named Keyboard"
+    )
+
+    assert response.sql == generated_sql
+
+    assert counters["retrieval"] == 1
+    assert counters["generation"] == 1
+    assert counters["execution"] == 1
+
+    # The name-value safety gate should reject the candidate
+    # before cached SQL validation/execution.
+    assert service.sql_validator.calls == 0
+    assert service.semantic_validator.calls == 0
     
 def test_different_unquoted_categorical_value_rejected():
     compatibility = (
@@ -889,6 +1035,8 @@ def main():
         test_opposite_ranking_rejects_semantic_cache,
         test_schema_fingerprint_mismatch_falls_back,
         test_invalid_semantic_cached_sql_is_deleted_and_falls_back,
+        test_different_city_value_rejects_semantic_cache,
+        test_different_named_product_rejects_semantic_cache,
     ]
 
     passed = 0

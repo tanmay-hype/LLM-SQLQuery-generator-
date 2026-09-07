@@ -59,3 +59,41 @@ minio-data/
 
 # Docker overrides and local compose env
 docker-compose.override.yml
+
+
+# ============================================================
+# Frontend - React / Vite
+# ============================================================
+
+# Dependencies
+frontend/node_modules/
+
+# Production builds
+frontend/dist/
+frontend/dist-ssr/
+
+# Vite cache
+frontend/.vite/
+
+# Frontend environment files
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Keep example environment configuration
+!frontend/.env.example
+
+# TypeScript build metadata
+frontend/*.tsbuildinfo
+
+# Logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# Editor / OS files
+frontend/.DS_Store
+frontend/Thumbs.db

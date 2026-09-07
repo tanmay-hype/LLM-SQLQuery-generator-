@@ -45,6 +45,7 @@ class SemanticSQLCacheService:
         *,
         question: str,
         intent: IntentAnalysis,
+        schema: dict | None = None,
         schema_fingerprint: str,
         provider: str,
         model: str,
