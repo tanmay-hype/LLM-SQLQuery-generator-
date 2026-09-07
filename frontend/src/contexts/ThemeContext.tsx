@@ -1,20 +1,13 @@
 import {
-  createContext,
   useEffect,
   useState,
   type ReactNode,
 } from 'react'
 
-export type Theme = 'light' | 'dark' | 'system'
-
-type ThemeContextValue = {
-  theme: Theme
-  resolvedTheme: 'light' | 'dark'
-  setTheme: (theme: Theme) => void
-}
-
-export const ThemeContext =
-  createContext<ThemeContextValue | null>(null)
+import {
+  ThemeContext,
+  type Theme,
+} from './theme-context'
 
 type ThemeProviderProps = {
   children: ReactNode
@@ -33,36 +26,47 @@ function getSystemTheme(): 'light' | 'dark' {
 export function ThemeProvider({
   children,
 }: ThemeProviderProps) {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    const storedTheme = localStorage.getItem(
-      STORAGE_KEY,
-    )
+  const [theme, setThemeState] =
+    useState<Theme>(() => {
+      const storedTheme =
+        localStorage.getItem(
+          STORAGE_KEY,
+        )
 
-    if (
-      storedTheme === 'light' ||
-      storedTheme === 'dark' ||
-      storedTheme === 'system'
-    ) {
-      return storedTheme
-    }
+      if (
+        storedTheme === 'light' ||
+        storedTheme === 'dark' ||
+        storedTheme === 'system'
+      ) {
+        return storedTheme
+      }
 
-    return 'system'
-  })
+      return 'system'
+    })
 
-  const [systemTheme, setSystemTheme] =
-    useState<'light' | 'dark'>(getSystemTheme)
+  const [
+    systemTheme,
+    setSystemTheme,
+  ] = useState<'light' | 'dark'>(
+    getSystemTheme,
+  )
 
   const resolvedTheme =
-    theme === 'system' ? systemTheme : theme
+    theme === 'system'
+      ? systemTheme
+      : theme
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia(
-      '(prefers-color-scheme: dark)',
-    )
+    const mediaQuery =
+      window.matchMedia(
+        '(prefers-color-scheme: dark)',
+      )
 
     const handleChange = () => {
       setSystemTheme(
-        mediaQuery.matches ? 'dark' : 'light',
+        mediaQuery.matches
+          ? 'dark'
+          : 'light',
       )
     }
 
@@ -80,17 +84,21 @@ export function ThemeProvider({
   }, [])
 
   useEffect(() => {
-    const root = document.documentElement
+    const root =
+      document.documentElement
 
     root.classList.toggle(
       'dark',
       resolvedTheme === 'dark',
     )
 
-    root.dataset.theme = resolvedTheme
+    root.dataset.theme =
+      resolvedTheme
   }, [resolvedTheme])
 
-  const setTheme = (newTheme: Theme) => {
+  const setTheme = (
+    newTheme: Theme,
+  ) => {
     localStorage.setItem(
       STORAGE_KEY,
       newTheme,

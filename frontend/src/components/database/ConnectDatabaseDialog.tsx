@@ -4,9 +4,22 @@ type ConnectionMode =
   | 'url'
   | 'manual'
 
+type ConnectionStatus =
+  | 'idle'
+  | 'testing'
+  | 'success'
+  | 'error'
+
 type ConnectDatabaseDialogProps = {
   open: boolean
   onClose: () => void
+}
+
+type TestConnectionResponse = {
+  success: boolean
+  message: string
+  database?: string | null
+  server_version?: string | null
 }
 
 function ConnectDatabaseDialog({
@@ -18,8 +31,156 @@ function ConnectDatabaseDialog({
     setMode,
   ] = useState<ConnectionMode>('url')
 
+  const [
+    connectionUrl,
+    setConnectionUrl,
+  ] = useState('')
+
+  const [
+    host,
+    setHost,
+  ] = useState('postgres-db')
+
+  const [
+    port,
+    setPort,
+  ] = useState('5432')
+
+  const [
+    database,
+    setDatabase,
+  ] = useState('llm_sql')
+
+  const [
+    username,
+    setUsername,
+  ] = useState('postgres')
+
+  const [
+    password,
+    setPassword,
+  ] = useState('')
+
+  const [
+    sslMode,
+    setSslMode,
+  ] = useState<
+    'disable' | 'prefer' | 'require'
+  >('disable')
+
+  const [
+    status,
+    setStatus,
+  ] = useState<ConnectionStatus>('idle')
+
+  const [
+    statusMessage,
+    setStatusMessage,
+  ] = useState('')
+
+  const [
+    connectedDatabase,
+    setConnectedDatabase,
+  ] = useState('')
+
+  const [
+    serverVersion,
+    setServerVersion,
+  ] = useState('')
+
   if (!open) {
     return null
+  }
+
+  async function handleTestConnection() {
+    setStatus('testing')
+    setStatusMessage('')
+    setConnectedDatabase('')
+    setServerVersion('')
+
+    const payload =
+      mode === 'url'
+        ? {
+            mode: 'url',
+            connection_url:
+              connectionUrl,
+          }
+        : {
+            mode: 'manual',
+            host,
+            port: Number(port),
+            database,
+            username,
+            password,
+            ssl_mode: sslMode,
+          }
+
+    try {
+      const response = await fetch(
+        'http://localhost:8000/connections/test',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+          body: JSON.stringify(payload),
+        },
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        let message =
+          'Connection failed.'
+
+        if (
+          typeof data?.detail ===
+          'string'
+        ) {
+          message = data.detail
+        }
+
+        if (
+          Array.isArray(data?.detail) &&
+          data.detail.length > 0
+        ) {
+          message =
+            data.detail[0]?.msg ??
+            message
+        }
+
+        throw new Error(message)
+      }
+
+      const result =
+        data as TestConnectionResponse
+
+      setStatus('success')
+      setStatusMessage(
+        result.message,
+      )
+      setConnectedDatabase(
+        result.database ?? '',
+      )
+      setServerVersion(
+        result.server_version ?? '',
+      )
+    } catch (error) {
+      setStatus('error')
+
+      if (
+        error instanceof Error
+      ) {
+        setStatusMessage(
+          error.message,
+        )
+      } else {
+        setStatusMessage(
+          'Connection failed.',
+        )
+      }
+    }
   }
 
   return (
@@ -49,7 +210,6 @@ function ConnectDatabaseDialog({
           shadow-2xl
         "
       >
-        {/* Header */}
         <div
           className="
             flex
@@ -104,9 +264,7 @@ function ConnectDatabaseDialog({
           </button>
         </div>
 
-        {/* Body */}
         <div className="px-6 py-5">
-          {/* Connection tabs */}
           <div
             className="
               flex
@@ -119,7 +277,10 @@ function ConnectDatabaseDialog({
           >
             <button
               type="button"
-              onClick={() => setMode('url')}
+              onClick={() => {
+                setMode('url')
+                setStatus('idle')
+              }}
               className={`
                 flex-1
                 rounded-md
@@ -127,7 +288,6 @@ function ConnectDatabaseDialog({
                 py-2
                 text-sm
                 font-medium
-                transition-colors
                 ${
                   mode === 'url'
                     ? `
@@ -137,7 +297,6 @@ function ConnectDatabaseDialog({
                     `
                     : `
                       text-[var(--text-secondary)]
-                      hover:text-[var(--text-primary)]
                     `
                 }
               `}
@@ -147,7 +306,10 @@ function ConnectDatabaseDialog({
 
             <button
               type="button"
-              onClick={() => setMode('manual')}
+              onClick={() => {
+                setMode('manual')
+                setStatus('idle')
+              }}
               className={`
                 flex-1
                 rounded-md
@@ -155,7 +317,6 @@ function ConnectDatabaseDialog({
                 py-2
                 text-sm
                 font-medium
-                transition-colors
                 ${
                   mode === 'manual'
                     ? `
@@ -165,7 +326,6 @@ function ConnectDatabaseDialog({
                     `
                     : `
                       text-[var(--text-secondary)]
-                      hover:text-[var(--text-primary)]
                     `
                 }
               `}
@@ -174,16 +334,11 @@ function ConnectDatabaseDialog({
             </button>
           </div>
 
-          {/* URL connection */}
           {mode === 'url' && (
             <div className="mt-5">
               <label
                 htmlFor="database-url"
-                className="
-                  text-sm
-                  font-medium
-                  text-[var(--text-primary)]
-                "
+                className="text-sm font-medium"
               >
                 PostgreSQL connection URL
               </label>
@@ -191,6 +346,12 @@ function ConnectDatabaseDialog({
               <input
                 id="database-url"
                 type="password"
+                value={connectionUrl}
+                onChange={(event) =>
+                  setConnectionUrl(
+                    event.target.value,
+                  )
+                }
                 placeholder="postgresql://user:password@host:5432/database"
                 className="
                   mt-2
@@ -202,47 +363,31 @@ function ConnectDatabaseDialog({
                   px-3
                   py-2.5
                   text-sm
-                  text-[var(--text-primary)]
                   outline-none
-                  placeholder:text-[var(--text-muted)]
                   focus:border-[var(--accent)]
-                  focus:ring-2
-                  focus:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)]
                 "
               />
-
-              <p
-                className="
-                  mt-2
-                  text-xs
-                  text-[var(--text-muted)]
-                "
-              >
-                Your credentials will only be sent to the
-                QueryPilot backend.
-              </p>
             </div>
           )}
 
-          {/* Manual connection */}
           {mode === 'manual' && (
             <div className="mt-5 space-y-4">
               <div>
                 <label
                   htmlFor="database-host"
-                  className="
-                    text-sm
-                    font-medium
-                    text-[var(--text-primary)]
-                  "
+                  className="text-sm font-medium"
                 >
                   Host
                 </label>
 
                 <input
                   id="database-host"
-                  type="text"
-                  placeholder="localhost"
+                  value={host}
+                  onChange={(event) =>
+                    setHost(
+                      event.target.value,
+                    )
+                  }
                   className="
                     mt-2
                     w-full
@@ -253,9 +398,7 @@ function ConnectDatabaseDialog({
                     px-3
                     py-2.5
                     text-sm
-                    text-[var(--text-primary)]
                     outline-none
-                    placeholder:text-[var(--text-muted)]
                     focus:border-[var(--accent)]
                   "
                 />
@@ -265,19 +408,19 @@ function ConnectDatabaseDialog({
                 <div>
                   <label
                     htmlFor="database-port"
-                    className="
-                      text-sm
-                      font-medium
-                      text-[var(--text-primary)]
-                    "
+                    className="text-sm font-medium"
                   >
                     Port
                   </label>
 
                   <input
                     id="database-port"
-                    type="text"
-                    defaultValue="5432"
+                    value={port}
+                    onChange={(event) =>
+                      setPort(
+                        event.target.value,
+                      )
+                    }
                     className="
                       mt-2
                       w-full
@@ -288,7 +431,6 @@ function ConnectDatabaseDialog({
                       px-3
                       py-2.5
                       text-sm
-                      text-[var(--text-primary)]
                       outline-none
                       focus:border-[var(--accent)]
                     "
@@ -298,19 +440,19 @@ function ConnectDatabaseDialog({
                 <div className="col-span-2">
                   <label
                     htmlFor="database-name"
-                    className="
-                      text-sm
-                      font-medium
-                      text-[var(--text-primary)]
-                    "
+                    className="text-sm font-medium"
                   >
                     Database
                   </label>
 
                   <input
                     id="database-name"
-                    type="text"
-                    placeholder="llm_sql"
+                    value={database}
+                    onChange={(event) =>
+                      setDatabase(
+                        event.target.value,
+                      )
+                    }
                     className="
                       mt-2
                       w-full
@@ -321,9 +463,7 @@ function ConnectDatabaseDialog({
                       px-3
                       py-2.5
                       text-sm
-                      text-[var(--text-primary)]
                       outline-none
-                      placeholder:text-[var(--text-muted)]
                       focus:border-[var(--accent)]
                     "
                   />
@@ -333,19 +473,19 @@ function ConnectDatabaseDialog({
               <div>
                 <label
                   htmlFor="database-username"
-                  className="
-                    text-sm
-                    font-medium
-                    text-[var(--text-primary)]
-                  "
+                  className="text-sm font-medium"
                 >
                   Username
                 </label>
 
                 <input
                   id="database-username"
-                  type="text"
-                  placeholder="postgres"
+                  value={username}
+                  onChange={(event) =>
+                    setUsername(
+                      event.target.value,
+                    )
+                  }
                   className="
                     mt-2
                     w-full
@@ -356,9 +496,7 @@ function ConnectDatabaseDialog({
                     px-3
                     py-2.5
                     text-sm
-                    text-[var(--text-primary)]
                     outline-none
-                    placeholder:text-[var(--text-muted)]
                     focus:border-[var(--accent)]
                   "
                 />
@@ -367,11 +505,7 @@ function ConnectDatabaseDialog({
               <div>
                 <label
                   htmlFor="database-password"
-                  className="
-                    text-sm
-                    font-medium
-                    text-[var(--text-primary)]
-                  "
+                  className="text-sm font-medium"
                 >
                   Password
                 </label>
@@ -379,6 +513,12 @@ function ConnectDatabaseDialog({
                 <input
                   id="database-password"
                   type="password"
+                  value={password}
+                  onChange={(event) =>
+                    setPassword(
+                      event.target.value,
+                    )
+                  }
                   placeholder="Enter database password"
                   className="
                     mt-2
@@ -390,9 +530,7 @@ function ConnectDatabaseDialog({
                     px-3
                     py-2.5
                     text-sm
-                    text-[var(--text-primary)]
                     outline-none
-                    placeholder:text-[var(--text-muted)]
                     focus:border-[var(--accent)]
                   "
                 />
@@ -401,18 +539,22 @@ function ConnectDatabaseDialog({
               <div>
                 <label
                   htmlFor="ssl-mode"
-                  className="
-                    text-sm
-                    font-medium
-                    text-[var(--text-primary)]
-                  "
+                  className="text-sm font-medium"
                 >
                   SSL mode
                 </label>
 
                 <select
                   id="ssl-mode"
-                  defaultValue="prefer"
+                  value={sslMode}
+                  onChange={(event) =>
+                    setSslMode(
+                      event.target.value as
+                        | 'disable'
+                        | 'prefer'
+                        | 'require',
+                    )
+                  }
                   className="
                     mt-2
                     w-full
@@ -423,7 +565,6 @@ function ConnectDatabaseDialog({
                     px-3
                     py-2.5
                     text-sm
-                    text-[var(--text-primary)]
                     outline-none
                     focus:border-[var(--accent)]
                   "
@@ -444,43 +585,75 @@ function ConnectDatabaseDialog({
             </div>
           )}
 
-          {/* Read-only guidance */}
-          <div
-            className="
-              mt-5
-              rounded-lg
-              border
-              border-[var(--border)]
-              bg-[var(--surface)]
-              px-4
-              py-3
-            "
-          >
-            <p
+          {status === 'success' && (
+            <div
               className="
-                text-sm
-                font-medium
-                text-[var(--text-primary)]
+                mt-5
+                rounded-lg
+                border
+                border-[var(--success)]
+                px-4
+                py-3
               "
             >
-              Read-only access recommended
-            </p>
+              <p
+                className="
+                  text-sm
+                  font-medium
+                  text-[var(--success)]
+                "
+              >
+                Connection successful
+              </p>
 
-            <p
+              <p
+                className="
+                  mt-1
+                  text-xs
+                  text-[var(--text-secondary)]
+                "
+              >
+                {connectedDatabase}
+                {serverVersion &&
+                  ` · PostgreSQL ${serverVersion}`}
+              </p>
+            </div>
+          )}
+
+          {status === 'error' && (
+            <div
               className="
-                mt-1
-                text-xs
-                leading-5
-                text-[var(--text-secondary)]
+                mt-5
+                rounded-lg
+                border
+                border-[var(--danger)]
+                px-4
+                py-3
               "
             >
-              For production databases, connect using a PostgreSQL
-              user that only has SELECT permissions.
-            </p>
-          </div>
+              <p
+                className="
+                  text-sm
+                  font-medium
+                  text-[var(--danger)]
+                "
+              >
+                Connection failed
+              </p>
+
+              <p
+                className="
+                  mt-1
+                  text-xs
+                  text-[var(--text-secondary)]
+                "
+              >
+                {statusMessage}
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Footer */}
         <div
           className="
             flex
@@ -496,6 +669,9 @@ function ConnectDatabaseDialog({
           <button
             type="button"
             onClick={onClose}
+            disabled={
+              status === 'testing'
+            }
             className="
               rounded-md
               border
@@ -505,8 +681,9 @@ function ConnectDatabaseDialog({
               py-2
               text-sm
               font-medium
-              text-[var(--text-primary)]
               hover:bg-[var(--surface-hover)]
+              disabled:cursor-not-allowed
+              disabled:opacity-50
             "
           >
             Cancel
@@ -514,6 +691,12 @@ function ConnectDatabaseDialog({
 
           <button
             type="button"
+            onClick={
+              handleTestConnection
+            }
+            disabled={
+              status === 'testing'
+            }
             className="
               rounded-md
               bg-[var(--accent)]
@@ -523,9 +706,13 @@ function ConnectDatabaseDialog({
               font-medium
               text-[var(--accent-foreground)]
               hover:bg-[var(--accent-hover)]
+              disabled:cursor-not-allowed
+              disabled:opacity-60
             "
           >
-            Test Connection
+            {status === 'testing'
+              ? 'Testing...'
+              : 'Test Connection'}
           </button>
         </div>
       </div>

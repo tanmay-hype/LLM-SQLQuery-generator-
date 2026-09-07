@@ -1,6 +1,5 @@
 import { useTheme } from '../../hooks/useTheme'
-import type { Theme } from '../../contexts/ThemeContext'
-
+import type { Theme } from '../../contexts/theme-context'
 const themes: Theme[] = [
   'light',
   'dark',
