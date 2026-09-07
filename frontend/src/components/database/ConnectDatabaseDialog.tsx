@@ -9,10 +9,20 @@ type ConnectionStatus =
   | 'testing'
   | 'success'
   | 'error'
+  | 'connecting'
+
+export type ActiveConnection = {
+  connectionId: string
+  database: string
+  serverVersion: string
+}
 
 type ConnectDatabaseDialogProps = {
   open: boolean
   onClose: () => void
+  onConnected: (
+    connection: ActiveConnection,
+  ) => void
 }
 
 type TestConnectionResponse = {
@@ -22,9 +32,16 @@ type TestConnectionResponse = {
   server_version?: string | null
 }
 
+type CreateConnectionResponse = {
+  connection_id: string
+  database: string
+  server_version: string
+}
+
 function ConnectDatabaseDialog({
   open,
   onClose,
+  onConnected,
 }: ConnectDatabaseDialogProps) {
   const [
     mode,
@@ -92,28 +109,31 @@ function ConnectDatabaseDialog({
     return null
   }
 
+  function buildPayload() {
+    if (mode === 'url') {
+      return {
+        mode: 'url',
+        connection_url:
+          connectionUrl,
+      }
+    }
+
+    return {
+      mode: 'manual',
+      host,
+      port: Number(port),
+      database,
+      username,
+      password,
+      ssl_mode: sslMode,
+    }
+  }
+
   async function handleTestConnection() {
     setStatus('testing')
     setStatusMessage('')
     setConnectedDatabase('')
     setServerVersion('')
-
-    const payload =
-      mode === 'url'
-        ? {
-            mode: 'url',
-            connection_url:
-              connectionUrl,
-          }
-        : {
-            mode: 'manual',
-            host,
-            port: Number(port),
-            database,
-            username,
-            password,
-            ssl_mode: sslMode,
-          }
 
     try {
       const response = await fetch(
@@ -124,11 +144,14 @@ function ConnectDatabaseDialog({
             'Content-Type':
               'application/json',
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(
+            buildPayload(),
+          ),
         },
       )
 
-      const data = await response.json()
+      const data =
+        await response.json()
 
       if (!response.ok) {
         let message =
@@ -142,7 +165,9 @@ function ConnectDatabaseDialog({
         }
 
         if (
-          Array.isArray(data?.detail) &&
+          Array.isArray(
+            data?.detail,
+          ) &&
           data.detail.length > 0
         ) {
           message =
@@ -178,6 +203,72 @@ function ConnectDatabaseDialog({
       } else {
         setStatusMessage(
           'Connection failed.',
+        )
+      }
+    }
+  }
+
+  async function handleConnect() {
+    setStatus('connecting')
+    setStatusMessage('')
+
+    try {
+      const response = await fetch(
+        'http://localhost:8000/connections',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+          body: JSON.stringify(
+            buildPayload(),
+          ),
+        },
+      )
+
+      const data =
+        await response.json()
+
+      if (!response.ok) {
+        let message =
+          'Could not create connection.'
+
+        if (
+          typeof data?.detail ===
+          'string'
+        ) {
+          message = data.detail
+        }
+
+        throw new Error(message)
+      }
+
+      const result =
+        data as CreateConnectionResponse
+
+      onConnected({
+        connectionId:
+          result.connection_id,
+        database:
+          result.database,
+        serverVersion:
+          result.server_version,
+      })
+
+      onClose()
+    } catch (error) {
+      setStatus('error')
+
+      if (
+        error instanceof Error
+      ) {
+        setStatusMessage(
+          error.message,
+        )
+      } else {
+        setStatusMessage(
+          'Could not create connection.',
         )
       }
     }
@@ -227,7 +318,6 @@ function ConnectDatabaseDialog({
               className="
                 text-lg
                 font-semibold
-                text-[var(--text-primary)]
               "
             >
               Connect PostgreSQL
@@ -256,9 +346,7 @@ function ConnectDatabaseDialog({
               rounded-md
               text-[var(--text-secondary)]
               hover:bg-[var(--surface-hover)]
-              hover:text-[var(--text-primary)]
             "
-            aria-label="Close dialog"
           >
             ×
           </button>
@@ -292,7 +380,6 @@ function ConnectDatabaseDialog({
                   mode === 'url'
                     ? `
                       bg-[var(--surface-raised)]
-                      text-[var(--text-primary)]
                       shadow-sm
                     `
                     : `
@@ -321,7 +408,6 @@ function ConnectDatabaseDialog({
                   mode === 'manual'
                     ? `
                       bg-[var(--surface-raised)]
-                      text-[var(--text-primary)]
                       shadow-sm
                     `
                     : `
@@ -347,11 +433,12 @@ function ConnectDatabaseDialog({
                 id="database-url"
                 type="password"
                 value={connectionUrl}
-                onChange={(event) =>
+                onChange={(event) => {
                   setConnectionUrl(
                     event.target.value,
                   )
-                }
+                  setStatus('idle')
+                }}
                 placeholder="postgresql://user:password@host:5432/database"
                 className="
                   mt-2
@@ -383,11 +470,12 @@ function ConnectDatabaseDialog({
                 <input
                   id="database-host"
                   value={host}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setHost(
                       event.target.value,
                     )
-                  }
+                    setStatus('idle')
+                  }}
                   className="
                     mt-2
                     w-full
@@ -399,7 +487,6 @@ function ConnectDatabaseDialog({
                     py-2.5
                     text-sm
                     outline-none
-                    focus:border-[var(--accent)]
                   "
                 />
               </div>
@@ -416,11 +503,12 @@ function ConnectDatabaseDialog({
                   <input
                     id="database-port"
                     value={port}
-                    onChange={(event) =>
+                    onChange={(event) => {
                       setPort(
                         event.target.value,
                       )
-                    }
+                      setStatus('idle')
+                    }}
                     className="
                       mt-2
                       w-full
@@ -432,7 +520,6 @@ function ConnectDatabaseDialog({
                       py-2.5
                       text-sm
                       outline-none
-                      focus:border-[var(--accent)]
                     "
                   />
                 </div>
@@ -448,11 +535,12 @@ function ConnectDatabaseDialog({
                   <input
                     id="database-name"
                     value={database}
-                    onChange={(event) =>
+                    onChange={(event) => {
                       setDatabase(
                         event.target.value,
                       )
-                    }
+                      setStatus('idle')
+                    }}
                     className="
                       mt-2
                       w-full
@@ -464,7 +552,6 @@ function ConnectDatabaseDialog({
                       py-2.5
                       text-sm
                       outline-none
-                      focus:border-[var(--accent)]
                     "
                   />
                 </div>
@@ -481,11 +568,12 @@ function ConnectDatabaseDialog({
                 <input
                   id="database-username"
                   value={username}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setUsername(
                       event.target.value,
                     )
-                  }
+                    setStatus('idle')
+                  }}
                   className="
                     mt-2
                     w-full
@@ -497,7 +585,6 @@ function ConnectDatabaseDialog({
                     py-2.5
                     text-sm
                     outline-none
-                    focus:border-[var(--accent)]
                   "
                 />
               </div>
@@ -514,12 +601,12 @@ function ConnectDatabaseDialog({
                   id="database-password"
                   type="password"
                   value={password}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setPassword(
                       event.target.value,
                     )
-                  }
-                  placeholder="Enter database password"
+                    setStatus('idle')
+                  }}
                   className="
                     mt-2
                     w-full
@@ -531,7 +618,6 @@ function ConnectDatabaseDialog({
                     py-2.5
                     text-sm
                     outline-none
-                    focus:border-[var(--accent)]
                   "
                 />
               </div>
@@ -547,14 +633,15 @@ function ConnectDatabaseDialog({
                 <select
                   id="ssl-mode"
                   value={sslMode}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setSslMode(
                       event.target.value as
                         | 'disable'
                         | 'prefer'
                         | 'require',
                     )
-                  }
+                    setStatus('idle')
+                  }}
                   className="
                     mt-2
                     w-full
@@ -566,17 +653,14 @@ function ConnectDatabaseDialog({
                     py-2.5
                     text-sm
                     outline-none
-                    focus:border-[var(--accent)]
                   "
                 >
                   <option value="disable">
                     Disable
                   </option>
-
                   <option value="prefer">
                     Prefer
                   </option>
-
                   <option value="require">
                     Require
                   </option>
@@ -670,7 +754,8 @@ function ConnectDatabaseDialog({
             type="button"
             onClick={onClose}
             disabled={
-              status === 'testing'
+              status === 'testing' ||
+              status === 'connecting'
             }
             className="
               rounded-md
@@ -682,38 +767,59 @@ function ConnectDatabaseDialog({
               text-sm
               font-medium
               hover:bg-[var(--surface-hover)]
-              disabled:cursor-not-allowed
               disabled:opacity-50
             "
           >
             Cancel
           </button>
 
-          <button
-            type="button"
-            onClick={
-              handleTestConnection
-            }
-            disabled={
-              status === 'testing'
-            }
-            className="
-              rounded-md
-              bg-[var(--accent)]
-              px-4
-              py-2
-              text-sm
-              font-medium
-              text-[var(--accent-foreground)]
-              hover:bg-[var(--accent-hover)]
-              disabled:cursor-not-allowed
-              disabled:opacity-60
-            "
-          >
-            {status === 'testing'
-              ? 'Testing...'
-              : 'Test Connection'}
-          </button>
+          {status === 'success' ? (
+            <button
+              type="button"
+              onClick={handleConnect}
+              className="
+                rounded-md
+                bg-[var(--accent)]
+                px-4
+                py-2
+                text-sm
+                font-medium
+                text-[var(--accent-foreground)]
+                hover:bg-[var(--accent-hover)]
+              "
+            >
+              Connect
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={
+                handleTestConnection
+              }
+              disabled={
+                status === 'testing' ||
+                status === 'connecting'
+              }
+              className="
+                rounded-md
+                bg-[var(--accent)]
+                px-4
+                py-2
+                text-sm
+                font-medium
+                text-[var(--accent-foreground)]
+                hover:bg-[var(--accent-hover)]
+                disabled:opacity-60
+              "
+            >
+              {status === 'testing'
+                ? 'Testing...'
+                : status ===
+                    'connecting'
+                  ? 'Connecting...'
+                  : 'Test Connection'}
+            </button>
+          )}
         </div>
       </div>
     </div>

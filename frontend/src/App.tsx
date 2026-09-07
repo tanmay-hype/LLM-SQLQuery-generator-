@@ -1,7 +1,9 @@
 import { useState } from 'react'
 
 import AppShell from './components/layout/AppShell'
-import ConnectDatabaseDialog from './components/database/ConnectDatabaseDialog'
+import ConnectDatabaseDialog, {
+  type ActiveConnection,
+} from './components/database/ConnectDatabaseDialog'
 import QueryWorkspace from './components/query/QueryWorkspace'
 
 function App() {
@@ -10,9 +12,17 @@ function App() {
     setIsConnectDialogOpen,
   ] = useState(false)
 
+  const [
+    connection,
+    setConnection,
+  ] = useState<ActiveConnection | null>(
+    null,
+  )
+
   return (
     <>
       <AppShell
+        connection={connection}
         onConnectDatabase={() =>
           setIsConnectDialogOpen(true)
         }
@@ -24,6 +34,9 @@ function App() {
         open={isConnectDialogOpen}
         onClose={() =>
           setIsConnectDialogOpen(false)
+        }
+        onConnected={
+          setConnection
         }
       />
     </>

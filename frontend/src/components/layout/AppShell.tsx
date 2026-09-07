@@ -1,15 +1,22 @@
 import type { ReactNode } from 'react'
+
+import type {
+  ActiveConnection,
+} from '../database/ConnectDatabaseDialog'
+
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 
 type AppShellProps = {
   children: ReactNode
   onConnectDatabase: () => void
+  connection: ActiveConnection | null
 }
 
 function AppShell({
   children,
   onConnectDatabase,
+  connection,
 }: AppShellProps) {
   return (
     <div
@@ -25,6 +32,7 @@ function AppShell({
         onConnectDatabase={
           onConnectDatabase
         }
+        connection={connection}
       />
 
       <div
