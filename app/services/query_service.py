@@ -223,7 +223,10 @@ class QueryService:
 
         self.sql_validator = SQLValidator()
 
-        self.sql_executor = SQLExecutor()
+        
+        self.sql_executor = SQLExecutor(
+            db_engine
+        )
 
         # ==================================================
         # SEMANTIC VALIDATION

@@ -1,4 +1,9 @@
 from functools import lru_cache
+from fastapi import HTTPException
+
+from app.services.connection_manager import (
+    connection_manager,
+)
 
 from app.cache.semantic_sql_cache import SemanticSQLCache
 from app.cache.sql_cache import SQLCache
@@ -28,7 +33,38 @@ def get_semantic_sql_cache() -> SemanticSQLCache:
         ),
     )
 
-    
+def get_connection_query_service(
+    connection_id: str,
+) -> QueryService:
+    """
+    Create a QueryService for an active
+    database connection.
+    """
+
+    connection = (
+        connection_manager.get_connection(
+            connection_id
+        )
+    )
+
+    if connection is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Database connection not found "
+                "or expired."
+            ),
+        )
+
+    return QueryService(
+        db_engine=connection.engine,
+        sql_cache=get_sql_cache(),
+        semantic_sql_cache=(
+            get_semantic_sql_cache()
+        ),
+    )
+
+ 
 def get_query_service() -> QueryService:
     """
     Return the application-wide QueryService instance.

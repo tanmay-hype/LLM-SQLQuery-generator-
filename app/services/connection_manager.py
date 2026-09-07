@@ -105,3 +105,5 @@ class DatabaseConnectionManager:
         connection.engine.dispose()
 
         return True
+    
+connection_manager = DatabaseConnectionManager()

@@ -1,17 +1,16 @@
-from app.core.config import settings 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter
 
-from app.core.dependencies import get_query_service, get_sql_cache
+from app.core.config import settings
+from app.core.dependencies import (
+    get_connection_query_service,
+    get_sql_cache,
+)
 from app.models.request import SQLRequest
 from app.models.response import SQLResponse
 
-from app.core.dependencies import get_query_service
-from app.services.query_service import QueryService
-from app.services.validator import SQLValidationError
-
-from app.services.sql_executor import SQLExecutionError
 
 router = APIRouter()
+
 
 @router.post(
     "/generate-sql",
@@ -20,9 +19,17 @@ router = APIRouter()
 )
 def generate_sql(
     request: SQLRequest,
-    query_service: QueryService = Depends(get_query_service),
 ):
-    return query_service.generate_sql(request.question)
+    query_service = (
+        get_connection_query_service(
+            request.connection_id
+        )
+    )
+
+    return query_service.generate_sql(
+        request.question
+    )
+
 
 @router.get(
     "/cache/sql/stats",
@@ -37,6 +44,7 @@ def get_sql_cache_stats():
         "enabled": settings.sql_cache_enabled,
         **stats,
     }
+
 
 @router.get("/")
 def health():

@@ -13,7 +13,7 @@ from app.models.connection import (
     DatabaseConnectionTestResponse,
 )
 from app.services.connection_manager import (
-    DatabaseConnectionManager,
+    connection_manager,
 )
 from app.services.connection_service import (
     DatabaseConnectionService,
@@ -27,10 +27,6 @@ router = APIRouter(
 
 connection_service = (
     DatabaseConnectionService()
-)
-
-connection_manager = (
-    DatabaseConnectionManager()
 )
 
 
