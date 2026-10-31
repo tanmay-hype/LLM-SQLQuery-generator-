@@ -165,8 +165,8 @@ Natural Language Question
            │
            ▼
 ┌──────────────────────────────┐
-│ 1. SQL Cache Lookup          │
-│    Key: normalized question  │
+│ 1. Exact SQL Cache Lookup    │
+│    Key: question + context   │
 └──────────────────────────────┘
            │
      [HIT] │ [MISS]
@@ -174,7 +174,17 @@ Natural Language Question
          Return     │
            │        ▼
            │ ┌──────────────────────────────┐
-           │ │ 2. Schema Loading            │
+           │ │ 2. Semantic SQL Cache Lookup  │
+           │ │    Embedding similarity       │
+           │ │    + compatibility checks     │
+           │ └──────────────────────────────┘
+           │        │
+           │   [HIT] │ [MISS]
+           │        │        │
+           │      Return     │
+           │                 ▼
+           │ ┌──────────────────────────────┐
+           │ │ 3. Schema Loading            │
            │ │    SQLAlchemy Inspector      │
            │ │    → Tables, Columns, Keys   │
            │ └──────────────────────────────┘
@@ -345,6 +355,10 @@ Natural Language Question
 | `ollama_model` | str | "mistral" | Ollama model name |
 | `schema_retrieval_top_k` | int | 5 | Top-K for schema retrieval |
 | `sql_cache_size` | int | 256 | Max SQL cache entries |
+| `sql_cache_version` | str | "v1" | Version namespace for SQL cache entries |
+| `semantic_sql_cache_enabled` | bool | True | Enable semantic SQL cache |
+| `semantic_sql_cache_size` | int | 256 | Max semantic SQL cache entries |
+| `semantic_sql_cache_similarity_threshold` | float | 0.95 | Minimum cosine similarity for semantic matches |
 | `compression_level` | str | "medium" | Schema compression aggressiveness |
 
 **Loading Mechanism**:
@@ -457,21 +471,16 @@ class PromptExample:
 **Main Method: `generate_sql(question: str) -> SQLResponse`**
 
 **Flow**:
-1. Check cache using normalized question
-2. Load schema from database
-3. Create schema documents
-4. Load or build schema index
-5. Detect query intent
-6. Retrieve relevant schema (hybrid: keyword + semantic)
-7. Compress schema
-8. Retrieve few-shot examples
-9. Build prompt with context
-10. Generate SQL via LLM
-11. Validate syntax and safety
-12. Correct if invalid
-13. Execute SQL
-14. Cache result
-15. Return response
+1. Load schema and initialize the schema index
+2. Detect query intent and resolve cache context
+3. Check the exact SQL cache
+4. Check the semantic SQL cache on an exact-cache miss
+5. Retrieve relevant schema (hybrid: keyword + semantic) on a cache miss
+6. Compress schema and retrieve few-shot examples
+7. Build the prompt and generate SQL via the LLM
+8. Validate and correct SQL if necessary
+9. Store validated SQL in both exact and semantic caches
+10. Execute SQL and return the response
 
 **Dependencies Owned**:
 - SchemaLoader
@@ -926,8 +935,7 @@ class BaseSQLCache(ABC):
   - Strips whitespace
   - Converts to lowercase
   - Removes extra spaces
-  - Consistent punctuation
-- **Key Generation**: SHA256 hash of normalized question
+- **Key Generation**: SHA256 hash of the normalized question plus schema fingerprint, provider, model, and cache version
 - **In-memory storage**: OrderedDict for LRU tracking
 
 **Methods**:
@@ -939,6 +947,26 @@ class BaseSQLCache(ABC):
 **LRU Eviction**:
 - When cache reaches max size, oldest entry is removed
 - Most recently used entries stay
+
+#### `semantic_cache_entry.py`, `semantic_sql_cache.py`
+**Purpose**: Store and search generated SQL by question meaning
+
+**Features**:
+- Thread-safe, bounded in-memory cache using question embeddings
+- Cosine-similarity search with a configurable threshold
+- Metadata filtering by schema fingerprint, provider, model, and cache version
+- FIFO eviction when the configured capacity is exceeded
+
+#### `semantic_sql_cache_service.py`
+**Purpose**: Coordinate safe semantic SQL cache lookup and storage
+
+**Lookup safety**:
+- Checks intent compatibility
+- Compares numeric, quoted, categorical, comparison, ranking, temporal, negation, and `BETWEEN` semantics
+- Validates matched SQL structurally and semantically before execution
+- Deletes invalid cached entries and falls back to normal generation
+
+Semantic cache hits are promoted into the exact SQL cache. Both caches are process-local and in-memory.
 
 ---
 
@@ -1509,3 +1537,79 @@ llm-sql-generator/
 - **Reliability**: Error correction, detailed logging, structured exception handling
 
 The modular architecture allows easy extension and component substitution while maintaining clean separation of concerns.
+
+
+## Questions
+
+* Q1. How did we apply semantic caching?
+
+  We apply semantic caching to generated SQL using a two-level, process-local
+  in-memory cache. The exact SQL cache is checked first using a SHA-256 key
+  derived from the normalized question, schema fingerprint, LLM provider,
+  model, and cache version. On an exact-cache miss, the semantic SQL cache
+  embeds the question and searches cached entries using cosine similarity.
+
+  A semantic candidate must pass metadata filters for schema fingerprint,
+  provider, model, and cache version. It must also pass deterministic
+  compatibility checks for intent, numeric and quoted values, categorical
+  values, comparisons, ranking direction, temporal direction, negation, and
+  `BETWEEN` semantics. The candidate SQL is then structurally and semantically
+  validated before execution. Invalid entries are deleted and normal SQL
+  generation continues.
+
+  Validated generated SQL is stored in both caches. A semantic hit is promoted
+  into the exact cache, allowing identical future requests to use the cheaper
+  exact lookup. The default semantic similarity threshold is 0.95 and both
+  caches are bounded and thread-safe; they are not persisted or shared across
+  application processes. Semantic schema retrieval remains a separate feature
+  using embeddings, FAISS, and keyword/semantic result fusion.
+
+* Q2. Why used FAISS vector over others ?
+
+  We use FAISS because it provides fast, scalable, and memory-efficient
+  similarity search for schema embeddings. It supports approximate nearest
+  neighbor indexes, reducing retrieval latency as the schema grows, while
+  keeping deployment simple because it can run locally without a separate
+  vector database. Keyword matching is still combined with semantic results
+  to improve recall for exact table and column names.
+
+* Q3. How do we reduced hallucination ?
+
+  We reduce hallucinations by grounding SQL generation in the database schema and
+  relevant schema retrieval results instead of relying on the model's general
+  knowledge. Generated SQL is checked for valid tables and columns, read-only
+  safety, and structural and semantic correctness before execution. Deterministic
+  validation also verifies intent, filters, values, comparisons, ordering,
+  temporal direction, negation, and `BETWEEN` semantics. Invalid SQL is rejected
+  and regenerated rather than executed, while validated results can be reused
+  through the exact and semantic caches.
+
+* Q4. How do we prevented underfitting and overfitting ?
+
+  We reduce underfitting by using representative training and evaluation examples
+  that cover different question types, schemas, joins, filters, aggregations, and
+  temporal conditions. We reduce overfitting through schema-aware prompting,
+  deterministic SQL validation, held-out tests, and evaluation on varied unseen
+  queries rather than relying only on memorized examples. The model is therefore
+  expected to generalize from the user's intent and retrieved schema context while
+  validation prevents unsupported tables, columns, or unsafe SQL from being used.
+
+* Q5. How did we reduced token costs ?
+
+  We reduced token costs by retrieving only the most relevant schema context
+  instead of sending the entire database schema with every request. Exact-match
+  and semantic caches reuse previous results, while concise prompts, limited
+  result sets, and validation before execution avoid unnecessary regeneration
+  and model calls.
+
+* Q6. Why we used gemini 2.5 flash over other models ?
+
+  We chose Gemini 2.5 Flash because it provides a strong balance of quality,
+  latency, context-window capacity, and cost for SQL generation. It can follow
+  schema-aware prompts and complex query instructions while responding quickly
+  enough for interactive use. Compared with larger models, it reduces inference
+  cost and latency; compared with smaller models, it generally provides more
+  reliable reasoning for joins, filters, aggregations, and temporal conditions.
+  Deterministic validation and regeneration further improve reliability without
+  requiring a more expensive model for every request.
+
