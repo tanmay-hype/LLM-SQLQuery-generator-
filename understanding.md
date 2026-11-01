@@ -1613,3 +1613,13 @@ The modular architecture allows easy extension and component substitution while 
   Deterministic validation and regeneration further improve reliability without
   requiring a more expensive model for every request.
 
+* Q7. How do we scale this engine to 10,000 requests .
+
+  We scale the engine horizontally by running multiple stateless API workers
+  behind a load balancer and placing long-running generation tasks on a queue.
+  Schema retrieval, caching, and rate limiting reduce repeated model calls, while
+  connection pooling and read replicas prevent the database from becoming a
+  bottleneck. We also use asynchronous processing, autoscaling based on queue
+  depth and latency, and monitoring for errors, token usage, and throughput.
+  This allows capacity to increase as demand grows while preserving validation,
+  isolation, and predictable response times.
